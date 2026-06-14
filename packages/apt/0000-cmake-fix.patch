@@ -1,0 +1,107 @@
+diff -u -r ../apt-2.9.3/apt-pkg/CMakeLists.txt ./apt-pkg/CMakeLists.txt
+--- ../apt-2.9.3/apt-pkg/CMakeLists.txt	2024-05-14 11:01:31.000000000 +0000
++++ ./apt-pkg/CMakeLists.txt	2024-05-24 11:35:38.422874198 +0000
+@@ -61,12 +58,12 @@
+ )
+ 
+ target_link_libraries(apt-pkg
+-                      PRIVATE -lutil ${CMAKE_DL_LIBS} ${RESOLV_LIBRARIES}
++                      PRIVATE ${CMAKE_DL_LIBS} ${RESOLV_LIBRARIES}
+                              ${CMAKE_THREAD_LIBS_INIT}
+                              ${ZLIB_LIBRARIES}
+                              ${BZIP2_LIBRARIES}
+                              ${LZMA_LIBRARIES}
+                              ${LZ4_LIBRARIES}
+                              $<$<BOOL:${ZSTD_FOUND}>:${ZSTD_LIBRARIES}>
+                              $<$<BOOL:${UDEV_FOUND}>:${UDEV_LIBRARIES}>
+                              $<$<BOOL:${SYSTEMD_FOUND}>:${SYSTEMD_LIBRARIES}>
+diff -u -r ../apt-2.9.3/CMakeLists.txt ./CMakeLists.txt
+--- ../apt-2.9.3/CMakeLists.txt	2024-05-14 11:01:31.000000000 +0000
++++ ./CMakeLists.txt	2024-05-24 11:33:02.902625542 +0000
+@@ -7,6 +7,7 @@
+ # Generic header locations
+ include_directories(${PROJECT_BINARY_DIR}/include)
+ 
++include(CheckSymbolExists)
+ 
+ enable_testing()
+ 
+@@ -97,13 +97,13 @@
+ endif()
+ 
+ # (De)Compressor libraries
+-find_package(ZLIB REQUIRED)
++find_package(ZLIB)
+ if (ZLIB_FOUND)
+   set(HAVE_ZLIB 1)
+ endif()
+ 
+ 
+-find_package(BZip2 REQUIRED)
++find_package(BZip2)
+ if (BZIP2_FOUND)
+   set(HAVE_BZ2 1)
+ endif()
+@@ -114,7 +114,7 @@
+ endif()
+ 
+ 
+-find_package(LZ4 REQUIRED)
++find_package(LZ4)
+ if (LZ4_FOUND)
+   set(HAVE_LZ4 1)
+ endif()
+@@ -195,14 +195,6 @@
+   endif()
+ endif()
+ 
+-# Handle resolving
+-check_function_exists(res_ninit HAVE_LIBC_RESOLV)
+-if(HAVE_LIBC_RESOLV)
+-    set(RESOLV_LIBRARIES)
+-else()
+-    set(RESOLV_LIBRARIES -lresolv)
+-endif()
+-
+ # Configure some variables like package, version and architecture.
+ set(PACKAGE ${PROJECT_NAME})
+ set(PACKAGE_MAIL "APT Development Team <deity@lists.debian.org>")
+@@ -216,11 +208,6 @@
+   message(STATUS "Found dpkg data dir: ${DPKG_DATADIR_CMD}")
+   set(DPKG_DATADIR "${DPKG_DATADIR_CMD}" CACHE PATH "dpkg data directory")
+ endif()
+-if (NOT DEFINED COMMON_ARCH)
+-  execute_process(COMMAND dpkg-architecture -qDEB_HOST_ARCH
+-                  OUTPUT_VARIABLE COMMON_ARCH OUTPUT_STRIP_TRAILING_WHITESPACE
+-                  COMMAND_ERROR_IS_FATAL ANY)
+-endif()
+ if (NOT DEFINED ROOT_GROUP)
+   execute_process(COMMAND id -gn root
+                   OUTPUT_VARIABLE ROOT_GROUP OUTPUT_STRIP_TRAILING_WHITESPACE
+@@ -254,7 +241,6 @@
+ add_subdirectory(dselect)
+ add_subdirectory(ftparchive)
+ add_subdirectory(methods)
+-add_subdirectory(test)
+ 
+ if (USE_NLS)
+ add_subdirectory(po)
+diff -u -r ../apt-2.9.3/doc/CMakeLists.txt ./doc/CMakeLists.txt
+--- ../apt-2.9.3/doc/CMakeLists.txt	2024-05-14 11:01:31.000000000 +0000
++++ ./doc/CMakeLists.txt	2024-05-14 18:33:35.040473072 +0000
+@@ -3,15 +3,6 @@
+ endif()
+ 
+ set(LINGUAS
+-    de
+-    es
+-    fr
+-    it
+-    ja
+-    nl
+-    pl
+-    pt_BR
+-    pt
+ )
+ 
+ set(TRANSLATED_ENTITIES

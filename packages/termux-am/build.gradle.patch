@@ -1,0 +1,11 @@
+diff -u -r ../TermuxAm-0.8.0/build.gradle ./build.gradle
+--- ../TermuxAm-0.8.0/build.gradle	2023-12-27 20:17:46.000000000 +0000
++++ ./build.gradle	2024-05-20 11:47:19.387224609 +0000
+@@ -4,7 +4,7 @@
+         mavenCentral()
+     }
+     dependencies {
+-        classpath "com.android.tools.build:gradle:7.4.2"
++        classpath "com.android.tools.build:gradle:8.4.0"
+     }
+ }

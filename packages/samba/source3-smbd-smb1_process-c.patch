@@ -1,0 +1,12 @@
+diff -u -r ../samba-4.20.1/source3/smbd/smb1_process.c ./source3/smbd/smb1_process.c
+--- ../samba-4.20.1/source3/smbd/smb1_process.c	2024-01-29 14:41:26.397078800 +0000
++++ ./source3/smbd/smb1_process.c	2024-05-17 05:05:59.918192230 +0000
+@@ -941,7 +941,7 @@
+ 	len = smb_len_tcp(data)+4;
+ 	for (i=1;i<100;i++) {
+ 		fname = talloc_asprintf(talloc_tos(),
+-				"/tmp/%s.%d.%s",
++				"@TERMUX_PREFIX@/tmp/%s.%d.%s",
+ 				name,
+ 				i,
+ 				type ? "req" : "resp");

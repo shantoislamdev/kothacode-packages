@@ -1,0 +1,35 @@
+--- a/spipe/main.c
++++ b/spipe/main.c
+@@ -72,7 +72,11 @@
+ 
+ 	/* Cancel the threads. */
+ 	for (i = 0; i < 2; i++) {
++#ifndef __ANDROID__
+ 		if ((rc = pthread_cancel(ET->threads[i])) != 0) {
++#else
++		if ((rc = pthread_kill(ET->threads[i], SIGUSR2)) != 0) {
++#endif
+ 			/*
+ 			 * According to the POSIX standard, a Thread ID should
+ 			 * still be valid after pthread_exit has been invoked
+@@ -328,12 +332,20 @@
+ 	exit(0);
+ 
+ err7:
++#ifndef __ANDROID__
+ 	if ((rc = pthread_cancel(ET.threads[0])) != 0)
++#else
++	if ((rc = pthread_kill(ET.threads[0], SIGUSR2)) != 0)
++#endif
+ 		warn0("pthread_cancel: %s", strerror(rc));
+ 	if ((rc = pthread_join(ET.threads[0], NULL)) != 0)
+ 		warn0("pthread_join: %s", strerror(rc));
+ err6:
++#ifndef __ANDROID__
+ 	if ((rc = pthread_cancel(ET.threads[1])) != 0)
++#else
++	if ((rc = pthread_kill(ET.threads[1], SIGUSR2)) != 0)
++#endif
+ 		warn0("pthread_cancel: %s", strerror(rc));
+ 	if ((rc = pthread_join(ET.threads[1], NULL)) != 0)
+ 		warn0("pthread_join: %s", strerror(rc));

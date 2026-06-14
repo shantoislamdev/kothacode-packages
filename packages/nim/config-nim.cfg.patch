@@ -1,0 +1,17 @@
+diff -uNr nim-1.6.4/config/nim.cfg nim-1.6.4.mod/config/nim.cfg
+--- nim-1.6.4/config/nim.cfg	2022-02-09 06:12:37.000000000 +0530
++++ nim-1.6.4.mod/config/nim.cfg	2022-03-05 12:08:06.184549530 +0530
+@@ -130,13 +130,6 @@
+ 
+ @if android:
+   cc = clang
+-  @if termux:
+-    gcc.options.linker = "-landroid-glob"
+-    gcc.cpp.options.linker = "-landroid-glob"
+-    clang.options.linker = "-landroid-glob"
+-    clang.cpp.options.linker = "-landroid-glob"
+-    tcc.options.linker = "-landroid-glob"
+-  @end
+ @end
+ 
+ @if nintendoswitch:

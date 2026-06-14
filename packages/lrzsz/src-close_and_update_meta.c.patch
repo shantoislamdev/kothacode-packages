@@ -1,0 +1,12 @@
+diff -u -r ../lrzsz-8cb2a6a29f6345f84d5e8248e2d3376166ab844f/src/close_and_update_meta.c ./src/close_and_update_meta.c
+--- ../lrzsz-8cb2a6a29f6345f84d5e8248e2d3376166ab844f/src/close_and_update_meta.c	2020-03-08 22:21:38.000000000 +0000
++++ ./src/close_and_update_meta.c	2024-05-14 10:23:35.970295254 +0000
+@@ -1,6 +1,7 @@
+ #include <fcntl.h>
+ #include <sys/stat.h>
+-#include <sys/times.h>
++#define __USE_BSD 1 /* Necessary for futimes() on Android */
++#include <sys/time.h>
+ #include <sys/types.h>
+ #include <utime.h>
+ #include <unistd.h>

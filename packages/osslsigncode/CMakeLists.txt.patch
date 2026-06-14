@@ -1,0 +1,13 @@
+diff -u -r ../osslsigncode-2.8/CMakeLists.txt ./CMakeLists.txt
+--- ../osslsigncode-2.8/CMakeLists.txt	2024-03-03 22:32:15.000000000 +0000
++++ ./CMakeLists.txt	2024-05-26 10:18:29.142172339 +0000
+@@ -82,9 +82,6 @@
+ # add paths to linker search and installed rpath
+ set_target_properties(osslsigncode PROPERTIES INSTALL_RPATH_USE_LINK_PATH TRUE)
+ 
+-# testing with CTest
+-include(CMakeTest)
+-
+ # installation rules for a project
+ set(BINDIR "${CMAKE_INSTALL_PREFIX}/bin")
+ install(TARGETS osslsigncode RUNTIME DESTINATION ${BINDIR})

@@ -1,0 +1,54 @@
+name: Docker image
+
+on:
+  push:
+    branches:
+    - main
+    paths:
+    - 'scripts/Dockerfile'
+    - 'scripts/properties.sh'
+    - 'scripts/setup-android-sdk.sh'
+    - 'scripts/setup-ubuntu.sh'
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    if: github.repository == 'termux-play-store/termux-packages'
+    steps:
+    - name: Clone repository
+      uses: actions/checkout@v6
+
+    - name: Build
+      run: |
+        docker build --tag termux-play-store/package-builder:latest scripts/
+        docker tag termux-play-store/package-builder:latest ghcr.io/termux-play-store/package-builder:latest
+    - name: Login to GHCR
+      if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && github.repository == 'termux-play-store/termux-packages'
+      uses: docker/login-action@v4
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.DOCKER_TOKEN }}
+    - name: Push
+      if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && github.repository == 'termux-play-store/termux-packages'
+      run: |
+        # ghcr.io seem to be unstable sometimes. It may suddenly drop connection
+        # during docker push when some layers are already uploaded. The workaround
+        # is to retry again 1 or 2 more times.
+        registry="ghcr.io/"
+        image=package-builder
+        for t in 1 2 3; do
+          if docker push "${registry}termux-play-store/${image}:latest"; then
+            break
+          else
+            if [ "$t" = "3" ]; then
+              echo "Giving up after 3 attempts"
+              exit 1
+            fi
+            sleep 20
+          fi
+        done

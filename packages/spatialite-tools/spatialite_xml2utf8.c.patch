@@ -1,0 +1,12 @@
+diff -u -r ../spatialite-tools-5.0.1/spatialite_xml2utf8.c ./spatialite_xml2utf8.c
+--- ../spatialite-tools-5.0.1/spatialite_xml2utf8.c	2021-02-07 16:34:04.000000000 +0000
++++ ./spatialite_xml2utf8.c	2024-05-21 12:51:53.742424776 +0000
+@@ -45,7 +45,7 @@
+ #include <localcharset.h>
+ #endif /* end localcharset */
+ #else /* not MINGW32 - WIN32 */
+-#if defined(__APPLE__) || defined(__ANDROID__)
++#if defined(__APPLE__)
+ #include <iconv.h>
+ #include <localcharset.h>
+ #else /* neither Mac OsX nor Android */

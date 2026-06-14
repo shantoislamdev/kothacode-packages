@@ -1,0 +1,15 @@
+diff -u -r ../TermuxAm-0.8.0/app/build.gradle ./app/build.gradle
+--- ../TermuxAm-0.8.0/app/build.gradle	2023-12-27 20:17:46.000000000 +0000
++++ ./app/build.gradle	2024-05-20 11:50:42.569294976 +0000
+@@ -3,6 +3,11 @@
+ android {
+     namespace "com.termux.termuxam"
+     compileSdkVersion 33
++
++    buildFeatures {
++        buildConfig true
++    }
++
+     defaultConfig {
+         applicationId "com.termux.termuxam"
+         minSdkVersion 21

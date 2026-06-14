@@ -1,0 +1,12 @@
+diff -u -r ../picom-12.5/src/utils/misc.h ./src/utils/misc.h
+--- ../picom-12.5/src/utils/misc.h	2024-11-13 06:48:38.000000000 +0000
++++ ./src/utils/misc.h	2024-11-25 17:32:11.041182970 +0000
+@@ -417,7 +417,7 @@
+ 
+ // Some versions of the Android libc do not have timespec_get(), use
+ // clock_gettime() instead.
+-#ifdef __ANDROID__
++#if defined(__ANDROID__) && __ANDROID_API__ < 29
+ 
+ #ifndef TIME_UTC
+ #define TIME_UTC 1

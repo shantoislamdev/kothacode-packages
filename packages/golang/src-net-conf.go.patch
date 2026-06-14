@@ -1,0 +1,18 @@
+diff -u -r ../go/src/net/conf.go ./src/net/conf.go
+--- ../go/src/net/conf.go	2024-05-01 19:49:47.000000000 +0000
++++ ./src/net/conf.go	2024-06-03 11:32:00.006505044 +0000
+@@ -414,7 +414,13 @@
+ 				var haveMDNSAllow bool
+ 				switch c.mdnsTest {
+ 				case mdnsFromSystem:
+-					_, err := os.Stat("/etc/mdns.allow")
++					var mdnsAllowPath string
++					if runtime.GOOS == "android" {
++						mdnsAllowPath = "@TERMUX_PREFIX@/etc/mdns.allow"
++					} else {
++						mdnsAllowPath = "/etc/mdns.allow"
++					}
++					_, err := os.Stat(mdnsAllowPath)
+ 					if err != nil && !errors.Is(err, fs.ErrNotExist) {
+ 						// Let libc figure out what is going on.
+ 						return hostLookupCgo, dnsConf

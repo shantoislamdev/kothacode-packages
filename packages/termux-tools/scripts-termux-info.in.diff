@@ -1,0 +1,35 @@
+diff -u -r ../termux-tools-3.0.8/scripts/termux-info.in ./scripts/termux-info.in
+--- ../termux-tools-3.0.8/scripts/termux-info.in	2024-08-27 06:17:26.000000000 +0000
++++ ./scripts/termux-info.in	2025-02-15 14:01:15.603109409 +0000
+@@ -39,30 +39,7 @@
+ }
+
+ repo_subscriptions_apt() {
+-	local main_sources
+-	main_sources=$(grep -E '^[[:space:]]*deb[[:space:]]' "@TERMUX_PREFIX@/etc/apt/sources.list")
+-
+-	if [ -n "$main_sources" ]; then
+-		echo "# sources.list"
+-		echo "$main_sources"
+-	fi
+-
+-	if [ -d "@TERMUX_PREFIX@/etc/apt/sources.list.d" ]; then
+-		local filename repo_package supl_sources
+-		while read -r filename; do
+-			repo_package=$(dpkg -S "$filename" 2>/dev/null | cut -d : -f 1)
+-			supl_sources=$(grep -E '^[[:space:]]*deb[[:space:]]' "$filename")
+-
+-			if [ -n "$supl_sources" ]; then
+-				if [ -n "$repo_package" ]; then
+-					echo "# $repo_package (sources.list.d/$(basename "$filename"))"
+-				else
+-					echo "# sources.list.d/$(basename "$filename")"
+-				fi
+-				echo "$supl_sources"
+-			fi
+-		done < <(find "@TERMUX_PREFIX@/etc/apt/sources.list.d" -maxdepth 1 ! -type d)
+-	fi
++	grep --no-filename URIs @TERMUX_PREFIX@/etc/apt/sources.list.d/*.sources
+ }
+
+ repo_subscriptions_pacman() {

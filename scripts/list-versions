@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+set -e -u
+
+PREFIX=/prefix
+TERMUX_HOST_PLATFORM=aarch64
+TERMUX_ARCH_BITS=64
+TERMUX_LLVM_VERSION=1
+TERMUX_LLVM_NEXT_MAJOR_VERSION=1
+TERMUX_LLVM_MAJOR_VERSION=1
+TERMUX_PKG_SRCDIR=/tmp/termux-src
+TERMUX_PKG_HOSTBUILD_DIR=/tmp/termux-hostbuild-dir
+TERMUX_PKG_CACHEDIR=/tmp/termux-pkg-cachedir
+TERMUX_PKG_BUILDER_DIR=/tmp/termux-pkg-builder-dir
+TERMUX_PKG_BUILDDIR=/tmp/termux-pkg-builddir
+TERMUX_PKG_MAKE_PROCESSES=1
+TERMUX_PKG_NAME=TODO
+TERMUX_PKG_TMPDIR=/tmp/termux-pkg-tmpdir
+TERMUX_DEBUG_BUILD=false
+TERMUX_PKG_API_LEVEL=30
+TERMUX_PYTHON_VERSION=3.11
+TERMUX_BUILD_TUPLE=x86_64-pc-linux-gnu
+TERMUX_PYTHON_HOME=/tmp/termux-python-home
+TERMUX_SCRIPTDIR=$(dirname "$(realpath "$0")")/..
+TERMUX_ON_DEVICE_BUILD=false
+
+# hack for dotnet
+mkdir -p $TERMUX_PKG_TMPDIR
+echo a > $TERMUX_PKG_TMPDIR/aspnetcore-runtime.txt
+echo a > $TERMUX_PKG_TMPDIR/aspnetcore-runtime-dbg.txt
+echo a > $TERMUX_PKG_TMPDIR/aspnetcore-targeting-pack.txt
+echo a > $TERMUX_PKG_TMPDIR/dotnet-apphost-pack.txt
+echo a > $TERMUX_PKG_TMPDIR/dotnet-host.txt
+echo a > $TERMUX_PKG_TMPDIR/dotnet-hostfxr.txt
+echo a > $TERMUX_PKG_TMPDIR/dotnet-runtime.txt
+echo a > $TERMUX_PKG_TMPDIR/dotnet-runtime-dbg.txt
+echo a > $TERMUX_PKG_TMPDIR/dotnet-sdk.txt
+echo a > $TERMUX_PKG_TMPDIR/dotnet-sdk-dbg.txt
+echo a > $TERMUX_PKG_TMPDIR/dotnet-targeting-pack.txt
+echo a > $TERMUX_PKG_TMPDIR/dotnet-templates.txt
+echo a > $TERMUX_PKG_TMPDIR/netstandard-targeting-pack-2.1.txt
+
+_show_usage() {
+> echo "Usage: $0 [-a ARCH]"
+> echo "List versions of local package definitions."
+> echo "  -a The architecture to build for: aarch64(default), x86_64 or arm"
+> exit 1
+}
+
+while getopts :a:hdio: option; do
+	case "$option" in
+		a) TERMUX_HOST_PLATFORM="$OPTARG";;
+		h) _show_usage;;
+		*) _show_usage >&2 ;;
+	esac
+done
+shift $((OPTIND-1))
+if [ "$#" -ne 0 ]; then _show_usage; fi
+if [[ ! "$TERMUX_HOST_PLATFORM" =~ ^(aarch64|x86_64|arm)$ ]]; then
+	echo "ERROR: Invalid arch '$TERMUX_ARCH'" 1>&2
+	exit 1
+fi
+
+. "$TERMUX_SCRIPTDIR"/scripts/properties.sh
+
+check_package() { # path
+	local path=$1
+	local pkg=$(basename "$path")
+	TERMUX_PKG_REVISION=0
+	TERMUX_ARCH=aarch64
+
+	. "$path"/build.sh
+
+	# Check if package is blacklisted:
+	if [[ "${TERMUX_PKG_BLACKLISTED_ARCHES-}" == *"$TERMUX_HOST_PLATFORM"* ]]; then
+		return
+	fi
+
+	if [ "$TERMUX_PKG_REVISION" != "0" ] || [ "$TERMUX_PKG_VERSION" != "${TERMUX_PKG_VERSION/-/}" ]; then
+		TERMUX_PKG_VERSION+="-$TERMUX_PKG_REVISION"
+	fi
+	echo "$pkg=$TERMUX_PKG_VERSION"
+
+	local subpkg_file
+	for subpkg_file in "$path"/*.subpackage.sh; do
+		if [ -f $subpkg_file ]; then
+			local subpkg_name=$(basename $subpkg_file)
+			local subpkg_name=${subpkg_name%.subpackage.sh}
+			(
+				. $subpkg_file
+				if [[ "${TERMUX_SUBPKG_EXCLUDED_ARCHES-}" != *"$TERMUX_HOST_PLATFORM"* ]]; then
+					echo "${subpkg_name}<-${pkg}=$TERMUX_PKG_VERSION"
+				fi
+			)
+		fi
+	done
+}
+
+for dir in $(jq --raw-output 'keys | .[]' "${TERMUX_SCRIPTDIR}"/repo.json); do
+	for path in "$dir"/*; do
+		(
+			check_package "$path"
+		)
+	done
+done

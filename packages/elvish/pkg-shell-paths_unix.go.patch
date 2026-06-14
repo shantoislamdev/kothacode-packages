@@ -1,0 +1,13 @@
+diff -u -r ../elvish-0.20.1/pkg/shell/paths_unix.go ./pkg/shell/paths_unix.go
+--- ../elvish-0.20.1/pkg/shell/paths_unix.go	2024-02-14 14:19:43.000000000 +0000
++++ ./pkg/shell/paths_unix.go	2024-06-03 10:19:58.741498100 +0000
+@@ -17,8 +17,7 @@
+ func defaultDataHome() (string, error) { return homePath(".local/share") }
+ 
+ var defaultDataDirs = []string{
+-	"/usr/local/share/elvish/lib",
+-	"/usr/share/elvish/lib",
++	"@TERMUX_PREFIX@/share/elvish/lib",
+ }
+ 
+ func defaultStateHome() (string, error) { return homePath(".local/state") }

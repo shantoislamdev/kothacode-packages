@@ -1,0 +1,39 @@
+diff -u -r ../cache/command-not-found-3.4.1/generate-db.js ./generate-db.js
+--- ../cache/command-not-found-3.4.1/generate-db.js	2026-03-08 12:07:11.000000000 +0000
++++ ./generate-db.js	2026-03-09 02:21:59.782807639 +0000
+@@ -1,10 +1,11 @@
+ #!/usr/bin/env node
+ import { glob, readFile, writeFile } from "node:fs/promises";
+-import { gunzip } from "node:zlib";
++import { exec } from 'node:child_process';
++import { readFileSync } from 'node:fs';
+ import { join } from "node:path";
+ import { promisify } from "node:util";
+ 
+-const gunzipAsync = promisify(gunzip);
++const execAsync = promisify(exec);
+ 
+ const { TERMUX_SCRIPTDIR, TERMUX_PREFIX, TERMUX_ARCH } = process.env;
+ 
+@@ -148,18 +149,16 @@
+ 
+ async function processRepo(repo, repoPath, arch) {
+   // Fetch the Contents.gz file for the given architecture from the apt mirror
+-  const url = `${repo.url}/dists/${repo.distribution}/Contents-${arch}.gz`;
+-  const response = await fetchURL(url);
++  const command = `curl --silent ${repo.url}/dists/${repo.distribution}/Contents-${arch}.xz | xzcat -`;
+ 
+-  // Since we are using a gzip file, we need to decompress it
+-  const data = await gunzipAsync(await response);
++  const { error, stdout, stderr } = await execAsync(command, {maxBuffer: 100 * 1024 * 1024});
+   // Convert to string and split by new lines
+   // Each line is of the format:
+   // "path/to/file package"
+   //
+   // Where `path/to/file` is the path to the file in the package, and `package`
+   // is the name of the package that provides this file.
+-  const lines = data.toString().split("\n");
++  const lines = stdout.split("\n");
+ 
+   // Stores mappings of binary names to package names
+   // The key is the binary name, and the value is an array of package names

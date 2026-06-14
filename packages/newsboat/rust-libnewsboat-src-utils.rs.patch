@@ -1,0 +1,15 @@
+--- a/rust/libnewsboat/src/utils.rs
++++ b/rust/libnewsboat/src/utils.rs
+@@ -1014,6 +1018,12 @@
+     result
+ }
+ 
++#[cfg(target_os = "android")]
++fn get_locale_encoding() -> String {
++    String::from("UTF-8")
++}
++
++#[cfg(not(target_os = "android"))]
+ fn get_locale_encoding() -> String {
+     unsafe {
+         use libc::{nl_langinfo, CODESET};

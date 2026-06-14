@@ -1,0 +1,47 @@
+diff -u -r ../libbsd-0.12.2/configure ./configure
+--- ../libbsd-0.12.2/configure	2024-03-18 02:18:17.000000000 +0000
++++ ./configure	2024-05-15 14:23:20.160786607 +0000
+@@ -12976,6 +12976,7 @@
+ 
+ linux*android*)
+   version_type=none # Android doesn't support versioned libraries.
++  api_time_macros=no
+   need_lib_prefix=no
+   need_version=no
+   library_names_spec='$libname$release$shared_ext'
+@@ -14260,7 +14261,7 @@
+ abi_wcsl=unknown
+ 
+ case $host_os in #(
+-  *-gnu* | gnu*) :
++  *-gnu* | gnu* | *android*) :
+ 
+     api_time_macros=no
+ 
+@@ -14285,7 +14286,7 @@
+     abi_fmtcheck=yes
+     abi_fpurge=yes
+     abi_freezero=yes
+-    abi_funopen=yes
++    abi_funopen=no
+     abi_getbsize=yes
+     abi_getpeereid=yes
+     abi_humanize_number=yes
+@@ -14300,7 +14301,7 @@
+     abi_nlist=yes
+     abi_pidfile=yes
+     abi_proctitle=yes
+-    abi_progname=yes
++    abi_progname=no
+     abi_readpassphrase=yes
+     # DROP: On glibc >= 2.26.
+     #abi_reallocarray=no
+@@ -17499,7 +17500,7 @@
+ then :
+ 
+       MD5_LIBS="$MD5_LIBS $ac_cv_search_MD5Update"
+-      abi_transparent_libmd=yes
++      abi_transparent_libmd=no
+ 
+ fi
+ 

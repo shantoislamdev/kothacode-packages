@@ -1,0 +1,11 @@
+diff -u -r ../libuv-v1.48.0/Makefile.am ./Makefile.am
+--- ../libuv-v1.48.0/Makefile.am	2024-02-07 20:20:07.000000000 +0000
++++ ./Makefile.am	2024-05-14 10:47:19.161595792 +0000
+@@ -404,6 +404,7 @@
+
+ if ANDROID
+ libuv_la_CFLAGS += -D_GNU_SOURCE
++libuv_la_SOURCES += src/unix/random-getentropy.c
+ endif
+
+ if CYGWIN

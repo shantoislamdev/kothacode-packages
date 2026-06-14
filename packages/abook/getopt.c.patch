@@ -1,0 +1,11 @@
+diff -u -r ../abook-0.6.1/getopt.c ./getopt.c
+--- ../abook-0.6.1/getopt.c	2015-10-04 02:37:39.000000000 +0000
++++ ./getopt.c	2024-05-15 14:39:36.850753319 +0000
+@@ -43,6 +43,7 @@
+ #endif
+ 
+ #include <stdio.h>
++#include <string.h>
+ #include <strings.h>
+ 
+ /* Comment out all this code if we are using the GNU C Library, and are not

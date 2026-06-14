@@ -1,0 +1,13 @@
+diff -u -r ../putty-0.81/unix/sftpserver.c ./unix/sftpserver.c
+--- ../putty-0.81/unix/sftpserver.c	2024-04-06 09:43:49.000000000 +0000
++++ ./unix/sftpserver.c	2024-06-30 23:24:44.216272336 +0000
+@@ -10,6 +10,9 @@
+ 
+ #include <sys/stat.h>
+ #include <sys/types.h>
++#ifdef __ANDROID__
++#define __USE_BSD /* For futimes() */
++#endif
+ #include <sys/time.h>
+ #include <fcntl.h>
+ #include <unistd.h>

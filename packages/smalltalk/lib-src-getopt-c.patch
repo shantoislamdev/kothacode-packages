@@ -1,0 +1,11 @@
+diff -u -r ../smalltalk-3.2.91/lib-src/getopt.c ./lib-src/getopt.c
+--- ../smalltalk-3.2.91/lib-src/getopt.c	2015-11-07 12:14:26.000000000 +0000
++++ ./lib-src/getopt.c	2024-05-16 11:59:36.452401714 +0000
+@@ -43,6 +43,7 @@
+ #endif
+ 
+ #include <stdio.h>
++#include <string.h>
+ 
+ /* Comment out all this code if we are using the GNU C Library, and are not
+    actually compiling the library itself.  This code is part of the GNU C

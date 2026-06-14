@@ -1,0 +1,11 @@
+diff -u -r ../rocksdb-8.11.3/env/io_posix.cc ./env/io_posix.cc
+--- ../rocksdb-8.11.3/env/io_posix.cc	2024-02-28 00:24:11.000000000 +0000
++++ ./env/io_posix.cc	2024-05-15 12:56:37.409226000 +0000
+@@ -11,6 +11,7 @@
+ #include "env/io_posix.h"
+ 
+ #include <fcntl.h>
++#include <sys/statfs.h>
+ 
+ #include <algorithm>
+ #include <cerrno>

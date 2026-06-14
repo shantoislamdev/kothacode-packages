@@ -1,0 +1,38 @@
+name: Generate proot loaders
+
+on:
+  workflow_dispatch:
+
+permissions: {} # none
+
+jobs:
+  build:
+    permissions:
+      contents: write # for git push
+    runs-on: ubuntu-latest
+    if: github.repository == 'termux-play-store/termux-packages'
+    steps:
+      - name: Git clone
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Build proot
+        run: ./scripts/run-docker.sh ./build-package.sh -a all -i proot
+      - name: Create new tag
+        id: get_tag
+        run: |
+          new_tag="proot-$(date "+%Y.%m.%d")"
+          existing_tag_revision=$(git tag | grep "$new_tag" | sort -r | head -n 1 | cut -d- -f3 | cut -dr -f2)
+          if [ -n "$existing_tag_revision" ]; then
+            tag_rev=$((existing_tag_revision + 1))
+          else
+            tag_rev=1
+          fi
+          new_tag="${new_tag}-r${tag_rev}"
+          git tag "$new_tag"
+          git push --tags
+          echo "tag_name=$new_tag" >> $GITHUB_OUTPUT
+      - name: Publish proot loaders to GitHub release
+        env:
+          GITHUB_TOKEN: ${{ secrets.CI_GITHUB_TOKEN }}
+        run: gh release create --title "Proot loader for Termux" "${{ steps.get_tag.outputs.tag_name }}" ./output/libproot*.so

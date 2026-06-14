@@ -1,0 +1,21 @@
+diff -u -r ../cache/tmp-checkout/src/daemon/main.c ./src/daemon/main.c
+--- ../cache/tmp-checkout/src/daemon/main.c	2024-07-01 11:19:30.088808441 +0000
++++ ./src/daemon/main.c	2024-07-01 11:24:03.647332029 +0000
+@@ -564,7 +369,7 @@
+     */
+ 
+     if (!getenv("LD_BIND_NOW")) {
+-        char *rp;
++        char *rp = getenv("TERMUX_EXEC__PROC_SELF_EXE");
+         char *canonical_rp;
+ 
+         /* We have to execute ourselves, because the libc caches the
+@@ -574,7 +379,7 @@
+ 
+         if ((canonical_rp = pa_realpath(PA_BINARY))) {
+ 
+-            if ((rp = pa_readlink("/proc/self/exe"))) {
++            if (rp || (rp = pa_readlink("/proc/self/exe"))) {
+ 
+                 if (pa_streq(rp, canonical_rp))
+                     pa_assert_se(execv(rp, argv) == 0);

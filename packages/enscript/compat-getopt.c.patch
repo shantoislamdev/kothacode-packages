@@ -1,0 +1,12 @@
+diff -u -r ../enscript-1.6.6/compat/getopt.c ./compat/getopt.c
+--- ../enscript-1.6.6/compat/getopt.c	2011-10-30 16:48:42.000000000 +0000
++++ ./compat/getopt.c	2024-05-21 17:32:34.574605035 +0000
+@@ -79,6 +79,8 @@
+ #endif
+ #endif
+ 
++#include <string.h>
++
+ #if defined (WIN32) && !defined (__CYGWIN32__)
+ /* It's not Unix, really.  See?  Capital letters.  */
+ #include <windows.h>

@@ -1,0 +1,9 @@
++++ ./hpwd.c	2024-05-14 14:31:16.909200669 +0000
+@@ -24,6 +24,7 @@
+ # endif
+ 
+ # include <stdio.h>
++# include <string.h>
+ 
+ # include "hfs.h"
+ # include "hcwd.h"

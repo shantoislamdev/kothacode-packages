@@ -1,0 +1,18 @@
+diff -N -u -r ../go/src/cgocfg/cgofalse.go ./src/cgocfg/cgofalse.go
+--- ../go/src/cgocfg/cgofalse.go	1970-01-01 00:00:00.000000000 +0000
++++ ./src/cgocfg/cgofalse.go	2024-06-03 19:37:30.125466801 +0000
+@@ -0,0 +1,5 @@
++//go:build !cgo
++    
++package cgocfg
++    
++const Enabled = false
+diff -N -u -r ../go/src/cgocfg/cgotrue.go ./src/cgocfg/cgotrue.go
+--- ../go/src/cgocfg/cgotrue.go	1970-01-01 00:00:00.000000000 +0000
++++ ./src/cgocfg/cgotrue.go	2024-06-03 19:37:30.677464557 +0000
+@@ -0,0 +1,5 @@
++//go:build cgo
++    
++package cgocfg
++    
++const Enabled = true

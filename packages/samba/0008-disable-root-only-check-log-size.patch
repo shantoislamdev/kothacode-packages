@@ -1,0 +1,19 @@
+diff -u -r ../samba-4.20.6/lib/util/debug.c ./lib/util/debug.c
+--- ../samba-4.20.6/lib/util/debug.c	2024-01-29 14:41:25.921075000 +0000
++++ ./lib/util/debug.c	2025-01-01 13:56:49.005036386 +0000
+@@ -1490,6 +1490,7 @@
+ {
+ 	off_t maxlog;
+ 
++#ifndef __ANDROID__
+ 	if (geteuid() != 0) {
+ 		/*
+ 		 * We need to be root to change the log file (tests use a fake
+@@ -1499,6 +1500,7 @@
+ 		 */
+ 		return;
+ 	}
++#endif
+ 
+ 	if(log_overflow || (!state.schedule_reopen_logs && !need_to_check_log_size())) {
+ 		return;

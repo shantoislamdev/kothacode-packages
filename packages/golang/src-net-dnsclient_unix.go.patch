@@ -1,0 +1,30 @@
+diff -u -r ../go/src/net/dnsclient_unix.go ./src/net/dnsclient_unix.go
+--- ../go/src/net/dnsclient_unix.go	2024-05-01 19:49:47.000000000 +0000
++++ ./src/net/dnsclient_unix.go	2024-06-03 11:35:19.584572688 +0000
+@@ -368,8 +368,16 @@
+ 
+ var resolvConf resolverConfig
+ 
++func getResolveConfPath() string {
++	if runtime.GOOS == "android" {
++		return "@TERMUX_PREFIX@/etc/resolv.conf"
++	} else {
++		return "/etc/resolv.conf"
++	}
++}
++
+ func getSystemDNSConfig() *dnsConfig {
+-	resolvConf.tryUpdate("/etc/resolv.conf")
++	resolvConf.tryUpdate(getResolveConfPath())
+ 	return resolvConf.dnsConfig.Load()
+ }
+ 
+@@ -377,7 +385,7 @@
+ func (conf *resolverConfig) init() {
+ 	// Set dnsConfig and lastChecked so we don't parse
+ 	// resolv.conf twice the first time.
+-	conf.dnsConfig.Store(dnsReadConfig("/etc/resolv.conf"))
++	conf.dnsConfig.Store(dnsReadConfig(getResolveConfPath()))
+ 	conf.lastChecked = time.Now()
+ 
+ 	// Prepare ch so that only one update of resolverConfig may

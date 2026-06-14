@@ -1,0 +1,11 @@
+diff -u -r ../cache/tmp-checkout/pyproject.toml ./pyproject.toml
+--- ../cache/tmp-checkout/pyproject.toml	2024-05-24 07:38:37.472996654 +0000
++++ ./pyproject.toml	2024-05-24 07:42:17.888092004 +0000
+@@ -82,7 +82,6 @@
+ dist = []
+ install = []
+ setup = [
+-    "--vsenv",  # Force use of MSVC on Windows, ignored on other platforms
+ ]
+ 
+ 

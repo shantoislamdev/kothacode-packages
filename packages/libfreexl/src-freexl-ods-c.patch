@@ -1,0 +1,12 @@
+diff -u -r ../freexl-2.0.0/src/freexl_ods.c ./src/freexl_ods.c
+--- ../freexl-2.0.0/src/freexl_ods.c	2023-07-25 05:12:29.000000000 +0000
++++ ./src/freexl_ods.c	2024-05-16 20:40:51.728213453 +0000
+@@ -61,7 +61,7 @@
+ #include <localcharset.h>
+ #endif /* end localcharset */
+ #else /* not WINDOWS */
+-#if defined(__APPLE__) || defined(__ANDROID__)
++#if defined(__APPLE__)
+ #include <iconv.h>
+ #include <localcharset.h>
+ #else /* neither Mac OsX nor Android */
