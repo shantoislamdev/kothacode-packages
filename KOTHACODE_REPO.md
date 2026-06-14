@@ -87,7 +87,7 @@ The first KothaCode repo profile is `aarch64` only, which targets normal 64-bit 
 
 ## Expanding The Bootstrap
 
-The default bootstrap is agent-focused and includes shell/APT basics plus `git`, `openssh`, `ripgrep`, `jq`, `patch`, and `unzip`. After the minimal bootstrap works, add larger language/toolchain packages through the workflow input:
+The default bootstrap is agent-focused and includes shell/APT basics plus `git`, `openssh`, `ripgrep`, and `unzip`. After the minimal bootstrap works, add larger language/toolchain packages through the workflow input:
 
 ```text
 bootstrap_extra_packages=python,nodejs

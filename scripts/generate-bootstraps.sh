@@ -469,12 +469,7 @@ EOF
 	pull_package dash
 	pull_package findutils
 	pull_package git
-	pull_package gawk
-	pull_package jq
 	pull_package openssh
-	pull_package patch
-	pull_package procps
-	pull_package psmisc
 	pull_package ripgrep
 	pull_package tar
 	pull_package termux-exec
