@@ -1,0 +1,248 @@
+name: KothaCode Termux Repository
+
+on:
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: Space-separated packages to build. Dependencies are built automatically.
+        required: true
+        default: apt bash ca-certificates curl dash findutils gawk git jq openssh patch procps psmisc ripgrep tar termux-exec termux-tools termux-keyring unzip util-linux
+      bootstrap_extra_packages:
+        description: Comma-separated extra packages to include in bootstrap archives.
+        required: false
+        default: ""
+      publish_bootstrap_to_r2:
+        description: Upload generated bootstrap zips to bootstrap/ in the R2 bucket.
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kothacode-termux-repo
+  cancel-in-progress: false
+
+env:
+  REPO_URL: https://repo.code.amikotha.com
+  R2_BUCKET: kothacode-termux-repo
+  APT_REPO_ORIGIN: KothaCode
+  APT_REPO_LABEL: KothaCode Termux
+  APT_REPO_SUITE: stable
+  APT_REPO_COMPONENT: main
+  APT_REPO_ARCHES: aarch64
+
+jobs:
+  build-packages:
+    name: Build ${{ matrix.arch }} packages
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - aarch64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost /usr/local/lib/android || true
+          df -h
+
+      - name: Prepare KothaCode APT public key
+        env:
+          APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+          APT_GPG_PUBLIC_KEY: ${{ secrets.APT_GPG_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.gnupg
+          chmod 700 ~/.gnupg
+
+          if [[ -n "${APT_GPG_PRIVATE_KEY:-}" ]]; then
+            printf '%s' "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
+            key_id="$(gpg --list-secret-keys --with-colons | awk -F: '$1 == "sec" { print $5; exit }')"
+            if [[ -z "$key_id" ]]; then
+              echo "::error::APT_GPG_PRIVATE_KEY did not contain an importable secret key"
+              exit 1
+            fi
+            gpg --batch --yes --output packages/termux-keyring/termux-packages.gpg --export "$key_id"
+          elif [[ -n "${APT_GPG_PUBLIC_KEY:-}" ]]; then
+            printf '%s' "$APT_GPG_PUBLIC_KEY" | gpg --batch --yes --dearmor --output packages/termux-keyring/termux-packages.gpg
+          else
+            echo "::warning::No APT_GPG_PRIVATE_KEY or APT_GPG_PUBLIC_KEY secret set; using the existing keyring file"
+          fi
+
+      - name: Build packages
+        env:
+          TERMUX_ARCH: ${{ matrix.arch }}
+          PACKAGE_LIST: ${{ inputs.packages }}
+        run: |
+          set -euo pipefail
+          ./scripts/run-docker.sh ./build-package.sh -a "$TERMUX_ARCH" -f $PACKAGE_LIST
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: debs-${{ matrix.arch }}
+          path: output/*.deb
+          if-no-files-found: error
+          retention-days: 7
+
+  publish-repo:
+    name: Publish APT repo to R2
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    needs: build-packages
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install publish tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y awscli dpkg-dev gnupg gzip xz-utils
+
+      - name: Download package artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: debs-*
+          path: built-debs
+
+      - name: Import APT signing key
+        env:
+          APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${APT_GPG_PRIVATE_KEY:-}" ]]; then
+            echo "::error::Missing APT_GPG_PRIVATE_KEY secret. The repo must be signed so apt can verify it."
+            exit 1
+          fi
+
+          mkdir -p ~/.gnupg
+          chmod 700 ~/.gnupg
+          printf '%s' "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
+          signing_key="$(gpg --list-secret-keys --with-colons | awk -F: '$1 == "sec" { print $5; exit }')"
+          if [[ -z "$signing_key" ]]; then
+            echo "::error::APT_GPG_PRIVATE_KEY did not contain an importable secret key"
+            exit 1
+          fi
+          echo "APT_GPG_SIGNING_KEY=$signing_key" >> "$GITHUB_ENV"
+
+      - name: Generate signed APT repository
+        env:
+          APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          bash ./scripts/generate-kothacode-apt-repo.sh \
+            --input-dir built-debs \
+            --output-dir repo-public
+
+      - name: Upload repository artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kothacode-apt-repo
+          path: repo-public
+          retention-days: 7
+
+      - name: Sync APT repository to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${R2_ACCOUNT_ID:-}" || -z "${AWS_ACCESS_KEY_ID:-}" || -z "${AWS_SECRET_ACCESS_KEY:-}" ]]; then
+            echo "::error::Missing one or more R2 secrets: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY"
+            exit 1
+          fi
+
+          aws s3 sync repo-public/dists "s3://$R2_BUCKET/dists" \
+            --endpoint-url "https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com" \
+            --delete
+          aws s3 sync repo-public/pool "s3://$R2_BUCKET/pool" \
+            --endpoint-url "https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com" \
+            --delete
+
+  build-bootstraps:
+    name: Build ${{ matrix.arch }} bootstrap
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    needs: publish-repo
+    strategy:
+      fail-fast: false
+      matrix:
+        arch:
+          - aarch64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install bootstrap tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y awscli curl jq unzip xz-utils zip
+
+      - name: Wait for repository metadata
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          packages_url="$REPO_URL/dists/stable/main/binary-$ARCH/Packages"
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --show-error --location "$packages_url" >/dev/null; then
+              exit 0
+            fi
+            echo "Repository metadata not visible yet ($attempt/20): $packages_url"
+            sleep 15
+          done
+          echo "::error::Repository metadata did not become available: $packages_url"
+          exit 1
+
+      - name: Generate bootstrap archive
+        env:
+          ARCH: ${{ matrix.arch }}
+          BOOTSTRAP_EXTRA_PACKAGES: ${{ inputs.bootstrap_extra_packages }}
+        run: |
+          set -euo pipefail
+          extra_args=()
+          if [[ -n "${BOOTSTRAP_EXTRA_PACKAGES:-}" ]]; then
+            extra_args+=(--add "$BOOTSTRAP_EXTRA_PACKAGES")
+          fi
+
+          ./scripts/generate-bootstraps.sh \
+            --architectures "$ARCH" \
+            --repository "$REPO_URL" \
+            "${extra_args[@]}"
+
+      - name: Upload bootstrap artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bootstrap-${{ matrix.arch }}
+          path: bootstrap-${{ matrix.arch }}.zip
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Sync bootstrap archive to R2
+        if: ${{ inputs.publish_bootstrap_to_r2 }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${R2_ACCOUNT_ID:-}" || -z "${AWS_ACCESS_KEY_ID:-}" || -z "${AWS_SECRET_ACCESS_KEY:-}" ]]; then
+            echo "::error::Missing one or more R2 secrets: R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY"
+            exit 1
+          fi
+
+          aws s3 cp "bootstrap-$ARCH.zip" "s3://$R2_BUCKET/bootstrap/bootstrap-$ARCH.zip" \
+            --endpoint-url "https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"

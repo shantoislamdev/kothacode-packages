@@ -10,17 +10,16 @@ export TERMUX_SCRIPTDIR=$(realpath "$(dirname "$(realpath "$0")")/../")
 BOOTSTRAP_TMPDIR=$(mktemp -d "${TMPDIR:-/tmp}/bootstrap-tmp.XXXXXXXX")
 trap 'rm -rf $BOOTSTRAP_TMPDIR' EXIT
 
-# By default, bootstrap archives will be built for all architectures
-# supported by Termux application.
-# Override with option '--architectures'.
-TERMUX_ARCHITECTURES=("arm" "aarch64" "x86_64")
+# By default, KothaCode bootstrap archives are built for 64-bit ARM Android
+# devices only. Override with option '--architectures' if another ABI is needed.
+TERMUX_ARCHITECTURES=("aarch64")
 
 # The supported termux package managers.
 TERMUX_PACKAGE_MANAGERS=("apt")
 
 # The repository base urls mapping for package managers.
 declare -A REPO_BASE_URLS=(
-	["apt"]="https://termux.net"
+	["apt"]="https://repo.code.amikotha.com"
 )
 
 # The package manager that will be installed in bootstrap.
@@ -426,25 +425,9 @@ for package_arch in "${TERMUX_ARCHITECTURES[@]}"; do
 	touch "${BOOTSTRAP_ROOTFS}/${TERMUX_PREFIX}/var/lib/dpkg/available"
 	touch "${BOOTSTRAP_ROOTFS}/${TERMUX_PREFIX}/var/lib/dpkg/status"
 
-	# Setup nano alternative:
 	mkdir -p "${BOOTSTRAP_ROOTFS}/${TERMUX_PREFIX}/etc/alternatives/" \
 		 "${BOOTSTRAP_ROOTFS}/${TERMUX_PREFIX}/bin/" \
 		 "${BOOTSTRAP_ROOTFS}/${TERMUX_PREFIX}/var/lib/dpkg/alternatives/"
-	ln -s "${TERMUX_PREFIX}/bin/nano" "${BOOTSTRAP_ROOTFS}/${TERMUX_PREFIX}/etc/alternatives/editor"
-	ln -s "${TERMUX_PREFIX}/etc/alternatives/editor" "${BOOTSTRAP_ROOTFS}/${TERMUX_PREFIX}/bin/editor"
-	ln -s "${TERMUX_PREFIX}/share/man/man1/nano.1.gz" "${BOOTSTRAP_ROOTFS}/${TERMUX_PREFIX}/etc/alternatives/editor.1.gz"
-	ln -s "${TERMUX_PREFIX}/etc/alternatives/editor.1.gz" "${BOOTSTRAP_ROOTFS}/${TERMUX_PREFIX}/share/man/man1/editor.1.gz"
-	cat << EOF > "${BOOTSTRAP_ROOTFS}/${TERMUX_PREFIX}/var/lib/dpkg/alternatives/editor"
-auto
-${TERMUX_PREFIX}/bin/editor
-editor.1.gz
-${TERMUX_PREFIX}/share/man/man1/editor.1.gz
-
-${TERMUX_PREFIX}/bin/nano
-50
-${TERMUX_PREFIX}/share/man/man1/nano.1.gz
-
-EOF
 
 	# Setup less alternative:
 	ln -s "${TERMUX_PREFIX}/bin/less" "${BOOTSTRAP_ROOTFS}/${TERMUX_PREFIX}/etc/alternatives/pager"
@@ -479,29 +462,25 @@ EOF
 	# Package manager.
 	pull_package ${TERMUX_PACKAGE_MANAGER}
 
-	# Core utilities.
+	# KothaCode agent runtime.
 	pull_package bash # Used by `termux-bootstrap-second-stage.sh`
-	pull_package command-not-found
+	pull_package ca-certificates
 	pull_package curl
 	pull_package dash
 	pull_package findutils
+	pull_package git
 	pull_package gawk
+	pull_package jq
+	pull_package openssh
+	pull_package patch
 	pull_package procps
 	pull_package psmisc
+	pull_package ripgrep
 	pull_package tar
 	pull_package termux-exec
 	pull_package termux-tools
-	pull_package util-linux
-
-	# Additional.
-	pull_package ed
-	pull_package debianutils
-	pull_package dos2unix
-	pull_package inetutils
-	pull_package nano
-	pull_package net-tools
-	pull_package patch
 	pull_package unzip
+	pull_package util-linux
 
 	# Handle additional packages.
 	for add_pkg in "${ADDITIONAL_PACKAGES[@]}"; do

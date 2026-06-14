@@ -15,7 +15,7 @@ TERMUX_PKG_SUGGESTS="gnupg"
 TERMUX_PKG_ESSENTIAL=true
 
 TERMUX_PKG_CONFFILES="
-etc/apt/sources.list.d/termux.sources
+etc/apt/sources.list.d/kothacode.sources
 "
 
 TERMUX_PKG_EXTRA_CONFIGURE_ARGS="
@@ -77,13 +77,13 @@ termux_step_pre_configure() {
 termux_step_post_make_install() {
 	mkdir -p "$TERMUX_PREFIX"/etc/apt/sources.list.d
 	{
-		echo "# The main termux repository"
+		echo "# The main KothaCode repository"
 		echo "Components: main"
 		echo "Signed-By: $TERMUX_PREFIX/etc/apt/trusted.gpg.d/termux-packages.gpg"
 		echo "Suites: stable"
 		echo "Types: deb"
-		echo "URIs: https://termux.net"
-	} > $TERMUX_PREFIX/etc/apt/sources.list.d/termux.sources
+		echo "URIs: https://repo.code.amikotha.com"
+	} > $TERMUX_PREFIX/etc/apt/sources.list.d/kothacode.sources
 
 	# apt-transport-tor
 	ln -sfr $TERMUX_PREFIX/lib/apt/methods/http $TERMUX_PREFIX/lib/apt/methods/tor
