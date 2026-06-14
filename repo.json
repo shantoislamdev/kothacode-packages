@@ -1,20 +1,8 @@
 {
   "packages": {
-    "name": "termux-main",
+    "name": "kothacode-main",
     "distribution": "stable",
     "component": "main",
-    "url": "https://termux.net"
-  },
-  "root-packages": {
-    "name": "termux-root",
-    "distribution": "root",
-    "component": "main",
-    "url": "https://root-packages.termux.net"
-  },
-  "x11-packages": {
-    "name": "termux-x11",
-    "distribution": "x11",
-    "component": "main",
-    "url": "https://x11-packages.termux.net"
+    "url": "https://repo.code.amikotha.com"
   }
 }

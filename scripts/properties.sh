@@ -371,7 +371,7 @@ fi
 #
 # Default value: `Termux`
 ##
-TERMUX__NAME="Termux"
+TERMUX__NAME="KothaCode"
 
 ##
 # The lower case value for `TERMUX__NAME`.
@@ -436,7 +436,7 @@ TERMUX__INTERNAL_NAME___MAX_LEN=7
 #
 # Default value: `termux`
 ##
-TERMUX__REPOS_HOST_ORG_NAME="termux"
+TERMUX__REPOS_HOST_ORG_NAME="amikotha"
 
 ##
 # Termux repositories host organization url.
@@ -464,7 +464,7 @@ TERMUX__REPOS_HOST_ORG_URL="https://github.com/$TERMUX__REPOS_HOST_ORG_NAME"
 #
 # Default value: `com.termux`
 ##
-TERMUX_APP__PACKAGE_NAME="com.termux"
+TERMUX_APP__PACKAGE_NAME="com.amikotha.code"
 TERMUX_APP_PACKAGE="$TERMUX_APP__PACKAGE_NAME" # Deprecated alternative variable for `TERMUX_APP__PACKAGE_NAME`
 
 __termux_build_props__add_variables_validator_actions "TERMUX_APP__PACKAGE_NAME" "app_package_name"
@@ -1816,7 +1816,7 @@ TERMUX_APP__LNAME="${TERMUX_APP__NAME,,}"
 # Validation regex: `TERMUX__APPS_APP_IDENTIFIER_REGEX`
 # Max length: `TERMUX__APPS_APP_IDENTIFIER___MAX_LEN`
 ##
-TERMUX_APP__APP_IDENTIFIER="termux"
+TERMUX_APP__APP_IDENTIFIER="kothacode"
 
 
 
@@ -1848,7 +1848,7 @@ TERMUX_APP__REPO_URL="$TERMUX__REPOS_HOST_ORG_URL/$TERMUX_APP__REPO_NAME"
 #
 # Default value: `com.termux`
 ##
-TERMUX_APP__NAMESPACE="com.termux"
+TERMUX_APP__NAMESPACE="com.amikotha.code"
 
 __termux_build_props__add_variables_validator_actions "TERMUX_APP__NAMESPACE" "app_package_name"
 
@@ -2180,13 +2180,13 @@ TERMUX_AM_APP__AM_CLASS__CLASS_NAME="$TERMUX_AM_APP__NAMESPACE.Am"
 # and are compiled locally.
 # FIXME: Checking for all variables will be added later in repo
 # changes pull, currently only `TERMUX_REPO_APP__PACKAGE_NAME` is checked.
-TERMUX_REPO_APP__PACKAGE_NAME="com.termux"
-TERMUX_REPO_APP__DATA_DIR="/data/data/com.termux"
-TERMUX_REPO__CORE_DIR="/data/data/com.termux/termux/core"
-TERMUX_REPO__APPS_DIR="/data/data/com.termux/termux/app"
-TERMUX_REPO__ROOTFS="/data/data/com.termux/files"
-TERMUX_REPO__HOME="/data/data/com.termux/files/home"
-TERMUX_REPO__PREFIX="/data/data/com.termux/files/usr"
+TERMUX_REPO_APP__PACKAGE_NAME="com.amikotha.code"
+TERMUX_REPO_APP__DATA_DIR="/data/data/com.amikotha.code"
+TERMUX_REPO__CORE_DIR="/data/data/com.amikotha.code/termux/core"
+TERMUX_REPO__APPS_DIR="/data/data/com.amikotha.code/termux/app"
+TERMUX_REPO__ROOTFS="/data/data/com.amikotha.code/files"
+TERMUX_REPO__HOME="/data/data/com.amikotha.code/files/home"
+TERMUX_REPO__PREFIX="/data/data/com.amikotha.code/files/usr"
 
 
 
