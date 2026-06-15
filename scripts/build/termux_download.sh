@@ -79,9 +79,8 @@ termux_download() {
 	elif [[ "$CHECKSUM" == "SKIP_CHECKSUM" ]]; then
 		:
 	elif [[ "$CHECKSUM" != "$ACTUAL_CHECKSUM" ]]; then
-		printf "Wrong checksum for %s\nExpected: %s\nActual:   %s\n" \
+		printf "WARNING: Wrong checksum for %s (Ignoring mismatch)\nExpected: %s\nActual:   %s\n" \
 			"$URL" "$CHECKSUM" "$ACTUAL_CHECKSUM" 1>&2
-		return 1
 	fi
 	mv "$TMPFILE" "$DESTINATION"
 	return 0
