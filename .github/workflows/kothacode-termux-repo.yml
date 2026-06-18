@@ -84,6 +84,14 @@ jobs:
           set -euo pipefail
           ./scripts/run-docker.sh ./build-package.sh -a "$TERMUX_ARCH" -f $PACKAGE_LIST
 
+      - name: Sanitize deb filenames for upload
+        run: |
+          cd output
+          for f in *:*; do
+            [ -e "$f" ] || continue
+            mv -- "$f" "$(echo "$f" | sed 's/:/%3a/g')"
+          done
+
       - name: Upload package artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -112,6 +120,12 @@ jobs:
         with:
           pattern: debs-*
           path: built-debs
+
+      - name: Restore epoch colons in deb filenames
+        run: |
+          find built-debs -name '*%3a*' | while read f; do
+            mv -- "$f" "$(echo "$f" | sed 's/%3a/:/g')"
+          done
 
       - name: Import APT signing key
         env:
