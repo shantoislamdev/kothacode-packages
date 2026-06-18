@@ -6,7 +6,7 @@ on:
       packages:
         description: Space-separated packages to build. Dependencies are built automatically.
         required: true
-        default: apt bash ca-certificates libcurl dash findutils gawk git jq mimocode openssh patch procps psmisc ripgrep tar termux-exec termux-tools termux-keyring unzip util-linux
+        default: apt bash ca-certificates libcurl dash findutils gawk git jq openssh patch procps psmisc ripgrep tar termux-exec termux-tools termux-keyring unzip util-linux
       bootstrap_extra_packages:
         description: Comma-separated extra packages to include in bootstrap archives.
         required: false
