@@ -164,12 +164,7 @@ jobs:
             --input-dir built-debs \
             --output-dir repo-public
 
-      - name: Upload repository artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: kothacode-apt-repo
-          path: repo-public
-          retention-days: 7
+
 
       - name: Sync APT repository to R2
         env:
@@ -190,6 +185,19 @@ jobs:
           aws s3 sync repo-public/pool "s3://$R2_BUCKET/pool" \
             --endpoint-url "https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com" \
             --delete
+
+      - name: Sanitize deb filenames for artifact upload
+        run: |
+          find repo-public -name '*:*.deb' | while read f; do
+            mv -- "$f" "$(echo "$f" | sed 's/:/%3a/g')"
+          done
+
+      - name: Upload repository artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kothacode-apt-repo
+          path: repo-public
+          retention-days: 7
 
   build-bootstraps:
     name: Build ${{ matrix.arch }} bootstrap
