@@ -16,6 +16,10 @@ on:
         required: true
         type: boolean
         default: true
+      reuse_run_id:
+        description: Run ID of a previous successful build (skips build job to save time)
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -35,7 +39,8 @@ env:
 
 jobs:
   build-packages:
-    name: Build ${{ matrix.arch }} packages
+    name: Build Packages
+    if: ${{ inputs.reuse_run_id == '' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     strategy:
@@ -105,6 +110,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     needs: build-packages
+    if: ${{ inputs.publish_bootstrap_to_r2 && !failure() && !cancelled() }}
 
     steps:
       - name: Checkout
@@ -120,6 +126,8 @@ jobs:
         with:
           pattern: debs-*
           path: built-debs
+          run-id: ${{ inputs.reuse_run_id || github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Restore epoch colons in deb filenames
         run: |
@@ -188,6 +196,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     needs: publish-repo
+    if: ${{ !failure() && !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
