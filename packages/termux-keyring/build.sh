@@ -20,6 +20,6 @@ termux_step_make_install() {
 	GPG_DIR="$TERMUX_PREFIX/etc/apt/trusted.gpg.d"
 	mkdir -p "$GPG_DIR"
 	for GPG_FILE in "$GPG_SHARE_DIR"/*.gpg; do
-		ln -s "$GPG_FILE" "$GPG_DIR/$(basename $GPG_FILE)"
+		ln -sf "$GPG_FILE" "$GPG_DIR/$(basename $GPG_FILE)"
 	done
 }
