@@ -113,7 +113,7 @@ jobs:
       - name: Install publish tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y awscli dpkg-dev gnupg gzip xz-utils
+          sudo apt-get install -y dpkg-dev gnupg gzip xz-utils
 
       - name: Download package artifacts
         uses: actions/download-artifact@v4
@@ -201,7 +201,7 @@ jobs:
       - name: Install bootstrap tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y awscli curl jq unzip xz-utils zip
+          sudo apt-get install -y curl jq unzip xz-utils zip
 
       - name: Wait for repository metadata
         env:
