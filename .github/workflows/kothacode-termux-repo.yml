@@ -23,6 +23,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: kothacode-termux-repo
@@ -51,7 +52,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Free runner disk space
         run: |
@@ -61,24 +62,28 @@ jobs:
       - name: Prepare KothaCode APT public key
         env:
           APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
-          APT_GPG_PUBLIC_KEY: ${{ secrets.APT_GPG_PUBLIC_KEY }}
         run: |
           set -euo pipefail
+          if [[ -z "${APT_GPG_PRIVATE_KEY:-}" ]]; then
+            echo "::error::Missing APT_GPG_PRIVATE_KEY secret. The repo keyring cannot be built and the repository cannot be signed."
+            exit 1
+          fi
+
           mkdir -p ~/.gnupg
           chmod 700 ~/.gnupg
+          printf '%s' "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
+          key_id="$(gpg --list-secret-keys --with-colons | awk -F: '$1 == "sec" { print $5; exit }')"
+          if [[ -z "$key_id" ]]; then
+            echo "::error::APT_GPG_PRIVATE_KEY did not contain an importable secret key"
+            exit 1
+          fi
 
-          if [[ -n "${APT_GPG_PRIVATE_KEY:-}" ]]; then
-            printf '%s' "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
-            key_id="$(gpg --list-secret-keys --with-colons | awk -F: '$1 == "sec" { print $5; exit }')"
-            if [[ -z "$key_id" ]]; then
-              echo "::error::APT_GPG_PRIVATE_KEY did not contain an importable secret key"
-              exit 1
-            fi
-            gpg --batch --yes --output packages/termux-keyring/termux-packages.gpg --export "$key_id"
-          elif [[ -n "${APT_GPG_PUBLIC_KEY:-}" ]]; then
-            printf '%s' "$APT_GPG_PUBLIC_KEY" | gpg --batch --yes --dearmor --output packages/termux-keyring/termux-packages.gpg
-          else
-            echo "::warning::No APT_GPG_PRIVATE_KEY or APT_GPG_PUBLIC_KEY secret set; using the existing keyring file"
+          gpg --batch --yes --output packages/termux-keyring/termux-packages.gpg --export "$key_id"
+          exported_key="$(gpg --batch --no-default-keyring --keyring packages/termux-keyring/termux-packages.gpg \
+            --list-keys --with-colons | awk -F: '$1 == "pub" { print $5; exit }')"
+          if [[ -z "$exported_key" || "$exported_key" != "$key_id" ]]; then
+            echo "::error::Exported keyring does not contain key $key_id"
+            exit 1
           fi
 
       - name: Build packages
@@ -98,23 +103,23 @@ jobs:
           done
 
       - name: Upload package artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: debs-${{ matrix.arch }}
           path: output/*.deb
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 30
 
   publish-repo:
     name: Publish APT repo to R2
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     needs: build-packages
-    if: ${{ inputs.publish_bootstrap_to_r2 && !failure() && !cancelled() }}
+    if: ${{ inputs.publish_bootstrap_to_r2 && !cancelled() && (inputs.reuse_run_id != '' || needs.build-packages.result == 'success') }}
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install publish tools
         run: |
@@ -122,7 +127,7 @@ jobs:
           sudo apt-get install -y dpkg-dev gnupg gzip xz-utils
 
       - name: Download package artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: debs-*
           path: built-debs
@@ -193,7 +198,7 @@ jobs:
           done
 
       - name: Upload repository artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: kothacode-apt-repo
           path: repo-public
@@ -204,7 +209,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     needs: publish-repo
-    if: ${{ !failure() && !cancelled() }}
+    if: ${{ !cancelled() && needs.publish-repo.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
@@ -213,7 +218,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install bootstrap tools
         run: |
@@ -253,7 +258,7 @@ jobs:
             "${extra_args[@]}"
 
       - name: Upload bootstrap artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bootstrap-${{ matrix.arch }}
           path: bootstrap-${{ matrix.arch }}.zip
