@@ -169,6 +169,13 @@ jobs:
             --input-dir built-debs \
             --output-dir repo-public
 
+      - name: Export repository public key
+        run: |
+          set -euo pipefail
+          gpg --batch --yes --output repo-public/kothacode-archive-key.gpg \
+            --export "$APT_GPG_SIGNING_KEY"
+          test -s repo-public/kothacode-archive-key.gpg
+
 
 
       - name: Sync APT repository to R2
@@ -190,6 +197,9 @@ jobs:
           aws s3 sync repo-public/pool "s3://$R2_BUCKET/pool" \
             --endpoint-url "https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com" \
             --delete
+          aws s3 cp repo-public/kothacode-archive-key.gpg \
+            "s3://$R2_BUCKET/kothacode-archive-key.gpg" \
+            --endpoint-url "https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
 
       - name: Sanitize deb filenames for artifact upload
         run: |
@@ -203,6 +213,14 @@ jobs:
           name: kothacode-apt-repo
           path: repo-public
           retention-days: 7
+
+      - name: Upload repository public key
+        uses: actions/upload-artifact@v7
+        with:
+          name: kothacode-archive-key
+          path: repo-public/kothacode-archive-key.gpg
+          if-no-files-found: error
+          retention-days: 30
 
   build-bootstraps:
     name: Build ${{ matrix.arch }} bootstrap
@@ -223,7 +241,13 @@ jobs:
       - name: Install bootstrap tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y curl jq unzip xz-utils zip
+          sudo apt-get install -y curl gnupg jq unzip xz-utils zip
+
+      - name: Download repository public key
+        uses: actions/download-artifact@v8
+        with:
+          name: kothacode-archive-key
+          path: bootstrap-trust
 
       - name: Wait for repository metadata
         env:
@@ -245,6 +269,7 @@ jobs:
         env:
           ARCH: ${{ matrix.arch }}
           BOOTSTRAP_EXTRA_PACKAGES: ${{ inputs.bootstrap_extra_packages }}
+          KOTHACODE_BOOTSTRAP_VERSION: ${{ github.sha }}-${{ github.run_id }}
         run: |
           set -euo pipefail
           extra_args=()
@@ -253,9 +278,10 @@ jobs:
           fi
 
           ./scripts/generate-bootstraps.sh \
-            --architectures "$ARCH" \
-            --repository "$REPO_URL" \
-            "${extra_args[@]}"
+             --architectures "$ARCH" \
+             --repository "$REPO_URL" \
+             --keyring bootstrap-trust/kothacode-archive-key.gpg \
+             "${extra_args[@]}"
 
       - name: Upload bootstrap artifact
         uses: actions/upload-artifact@v7
@@ -265,6 +291,14 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Upload bootstrap manifest
+        uses: actions/upload-artifact@v7
+        with:
+          name: bootstrap-${{ matrix.arch }}-manifest
+          path: bootstrap-${{ matrix.arch }}.manifest.json
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Sync bootstrap archive to R2
         if: ${{ inputs.publish_bootstrap_to_r2 }}
         env:
@@ -273,6 +307,7 @@ jobs:
           AWS_DEFAULT_REGION: auto
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           ARCH: ${{ matrix.arch }}
+          BOOTSTRAP_VERSION: ${{ github.sha }}-${{ github.run_id }}
         run: |
           set -euo pipefail
           if [[ -z "${R2_ACCOUNT_ID:-}" || -z "${AWS_ACCESS_KEY_ID:-}" || -z "${AWS_SECRET_ACCESS_KEY:-}" ]]; then
@@ -280,5 +315,9 @@ jobs:
             exit 1
           fi
 
-          aws s3 cp "bootstrap-$ARCH.zip" "s3://$R2_BUCKET/bootstrap/bootstrap-$ARCH.zip" \
+          aws s3 cp "bootstrap-$ARCH.zip" \
+            "s3://$R2_BUCKET/bootstrap/releases/$BOOTSTRAP_VERSION/bootstrap-$ARCH.zip" \
+            --endpoint-url "https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
+          aws s3 cp "bootstrap-$ARCH.manifest.json" \
+            "s3://$R2_BUCKET/bootstrap/releases/$BOOTSTRAP_VERSION/bootstrap-$ARCH.manifest.json" \
             --endpoint-url "https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"

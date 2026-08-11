@@ -3,12 +3,12 @@
 ##  Script for generating bootstrap archives.
 ##
 
-set -e
+set -euo pipefail
 
 export TERMUX_SCRIPTDIR=$(realpath "$(dirname "$(realpath "$0")")/../")
-. $(dirname "$(realpath "$0")")/properties.sh
+. "$(dirname "$(realpath "$0")")/properties.sh"
 BOOTSTRAP_TMPDIR=$(mktemp -d "${TMPDIR:-/tmp}/bootstrap-tmp.XXXXXXXX")
-trap 'rm -rf $BOOTSTRAP_TMPDIR' EXIT
+trap 'rm -rf -- "$BOOTSTRAP_TMPDIR"' EXIT
 
 # By default, KothaCode bootstrap archives are built for 64-bit ARM Android
 # devices only. Override with option '--architectures' if another ABI is needed.
@@ -32,11 +32,11 @@ REPO_BASE_URL="${REPO_BASE_URLS[${TERMUX_PACKAGE_MANAGER}]}"
 
 # A list of non-essential packages. By default it is empty, but can
 # be filled with option '--add'.
-declare -a ADDITIONAL_PACKAGES
+declare -a ADDITIONAL_PACKAGES=()
 
 # Check for some important utilities that may not be available for
 # some reason.
-for cmd in ar awk curl grep gzip find sed tar xargs xz zip jq; do
+for cmd in ar awk curl gpgv grep gzip find sed sha256sum stat tar xargs xz zip jq; do
 	if [ -z "$(command -v $cmd)" ]; then
 		echo "[!] Utility '$cmd' is not available in PATH."
 		exit 1
@@ -44,16 +44,45 @@ for cmd in ar awk curl grep gzip find sed tar xargs xz zip jq; do
 done
 
 TERMUX_BUILD_BOOTSTRAPS=false
+APT_KEYRING="${APT_KEYRING:-}"
 
 # Download package lists from remote repository.
 read_package_list_deb() {
 	local architecture
 	for architecture in "$1"; do
 		if [ ! -e "${BOOTSTRAP_TMPDIR}/packages.${architecture}" ]; then
-			echo "[*] Downloading package list for architecture '${architecture}'..."
+			if [ -z "$APT_KEYRING" ] || [ ! -f "$APT_KEYRING" ]; then
+				echo "[!] A readable --keyring is required for remote bootstrap generation."
+				exit 1
+			fi
+			echo "[*] Downloading and verifying package list for architecture '${architecture}'..."
+			local inrelease="${BOOTSTRAP_TMPDIR}/InRelease.${architecture}"
+			local release="${BOOTSTRAP_TMPDIR}/Release.${architecture}"
+			local packages_path="main/binary-${architecture}/Packages"
+			curl --fail --location --output "$inrelease" \
+				"${REPO_BASE_URL}/dists/stable/InRelease"
 			curl --fail --location \
 				--output "${BOOTSTRAP_TMPDIR}/packages.${architecture}" \
 				"${REPO_BASE_URL}/dists/stable/main/binary-${architecture}/Packages"
+			gpgv --keyring "$APT_KEYRING" --output "$release" "$inrelease"
+			local expected_sha256 expected_size actual_sha256 actual_size
+			expected_sha256=$(awk -v path="$packages_path" '
+				$0 == "SHA256:" { in_sha256 = 1; next }
+				in_sha256 && $3 == path { print $1; exit }
+				in_sha256 && $0 !~ /^ / { exit }
+			' "$release")
+			expected_size=$(awk -v path="$packages_path" '
+				$0 == "SHA256:" { in_sha256 = 1; next }
+				in_sha256 && $3 == path { print $2; exit }
+				in_sha256 && $0 !~ /^ / { exit }
+			' "$release")
+			actual_sha256=$(sha256sum "${BOOTSTRAP_TMPDIR}/packages.${architecture}" | awk '{print $1}')
+			actual_size=$(stat -c '%s' "${BOOTSTRAP_TMPDIR}/packages.${architecture}")
+			if [ -z "$expected_sha256" ] || [ "$actual_sha256" != "$expected_sha256" ] || \
+				[ "$actual_size" != "$expected_size" ]; then
+				echo "[!] Signed Packages metadata verification failed for '${architecture}'."
+				exit 1
+			fi
 			echo >> "${BOOTSTRAP_TMPDIR}/packages.${architecture}"
 		fi
 
@@ -63,7 +92,7 @@ read_package_list_deb() {
 				local package_name
 				package_name=$(echo "$package" | grep -i "^Package:" | awk '{ print $2 }')
 
-				if [ -z "${PACKAGE_METADATA["$package_name"]}" ]; then
+				if [[ ! -v "PACKAGE_METADATA[$package_name]" ]]; then
 					PACKAGE_METADATA["$package_name"]="$package"
 				else
 					local prev_package_ver cur_package_ver
@@ -152,7 +181,7 @@ pull_package() {
 		package_dependencies=$(
 			while read -r token; do
 				echo "$token" | cut -d'|' -f1 | sed -E 's@\(.*\)@@'
-			done < <(echo "${PACKAGE_METADATA[${package_name}]}" | grep -i "^Depends:" | sed -E 's@^[Dd]epends:@@' | tr ',' '\n')
+			done < <(echo "${PACKAGE_METADATA[${package_name}]}" | grep -i "^Depends:" | sed -E 's@^[Dd]epends:@@' | tr ',' '\n' || true)
 		)
 
 		# Recursively handle dependencies.
@@ -173,6 +202,16 @@ pull_package() {
 			else
 				echo "[*] Downloading '$package_name'..."
 				curl --fail --location --output "$package_tmpdir/package.deb" "$package_url"
+				local expected_sha256 expected_size actual_sha256 actual_size
+				expected_sha256=$(echo "${PACKAGE_METADATA[${package_name}]}" | awk 'tolower($1) == "sha256:" {print $2; exit}')
+				expected_size=$(echo "${PACKAGE_METADATA[${package_name}]}" | awk 'tolower($1) == "size:" {print $2; exit}')
+				actual_sha256=$(sha256sum "$package_tmpdir/package.deb" | awk '{print $1}')
+				actual_size=$(stat -c '%s' "$package_tmpdir/package.deb")
+				if [ -z "$expected_sha256" ] || [ -z "$expected_size" ] || \
+					[ "$actual_sha256" != "$expected_sha256" ] || [ "$actual_size" != "$expected_size" ]; then
+					echo "[!] Package integrity verification failed for '$package_name'."
+					exit 1
+				fi
 			fi
 
 			echo "[*] Extracting '$package_name'..."
@@ -213,7 +252,7 @@ pull_package() {
 				tar xf "$control_archive"
 				{
 					cat control
-					echo "Status: install ok installed"
+					echo "Status: install ok unpacked"
 					echo
 				} >> "${BOOTSTRAP_ROOTFS}/${TERMUX_PREFIX}/var/lib/dpkg/status"
 
@@ -270,11 +309,43 @@ pull_package() {
 	fi
 }
 
+normalize_termux_profile() {
+	local profile="${BOOTSTRAP_ROOTFS}/${TERMUX_PREFIX}/etc/profile.d/init-termux-properties.sh"
+	[ -f "$profile" ] || return 0
+
+	local legacy_profile portable_profile current_profile
+	legacy_profile=$(cat <<'EOF'
+if [ ! -e /data/data/com.termux/files/home/.config/termux/termux.properties ] && [ ! -e /data/data/com.termux/files/home/.termux/termux.properties ]; then
+	mkdir -p /data/data/com.termux/files/home/.config/termux/
+	cp /data/data/com.termux/files/usr/share/examples/termux/termux.properties /data/data/com.termux/files/home/.config/termux/termux.properties
+fi
+EOF
+)
+	current_profile=$(cat "$profile")
+	if [[ "$current_profile" == "$legacy_profile" ]]; then
+		portable_profile=$(cat <<'EOF'
+if [ ! -e "${HOME}/.config/termux/termux.properties" ] && [ ! -e "${HOME}/.termux/termux.properties" ]; then
+	mkdir -p "${HOME}/.config/termux/"
+	if [ -r "${PREFIX}/share/examples/termux/termux.properties" ]; then
+		cp "${PREFIX}/share/examples/termux/termux.properties" "${HOME}/.config/termux/termux.properties"
+	fi
+fi
+EOF
+)
+		printf '%s\n' "$portable_profile" > "$profile"
+	fi
+	if grep -Fq '/data/data/com.termux' "$profile"; then
+		echo "[!] Unsupported legacy Termux profile initializer in bootstrap."
+		exit 1
+	fi
+}
+
 # Final stage: generate bootstrap archive and place it to current
 # working directory.
 # Information about symlinks is stored in file SYMLINKS.txt.
 create_bootstrap_archive() {
 	echo "[*] Creating 'bootstrap-${1}.zip'..."
+	normalize_termux_profile
 	(cd "${BOOTSTRAP_ROOTFS}/${TERMUX_PREFIX}"
 		# Do not store symlinks in bootstrap archive.
 		# Instead, put all information to SYMLINKS.txt
@@ -283,10 +354,53 @@ create_bootstrap_archive() {
 			rm -f "$link"
 		done < <(find . -type l -print0)
 
-		zip -r9 "${BOOTSTRAP_TMPDIR}/bootstrap-${1}.zip" ./*
+		while IFS= read -r line; do
+			[ -z "$line" ] && continue
+			if [[ "$line" != *"←"* ]] || [[ "${line#*←}" == *"←"* ]]; then
+				echo "[!] Malformed bootstrap symlink manifest entry: $line"
+				exit 1
+			fi
+			local target="${line%%←*}"
+			local link="${line#*←}"
+			if [ -z "$target" ] || [[ "$link" != ./* ]] || [[ "$link" == *"/../"* ]]; then
+				echo "[!] Unsafe bootstrap symlink manifest entry: $line"
+				exit 1
+			fi
+			case "$target←$link" in
+				"/system/lib64/libc.so←./lib/libandroid-glob.so"|\
+				"/system/lib64/libc.so←./lib/libandroid-support.so") ;;
+				"${TERMUX_PREFIX}/"*) ;;
+				/*)
+					echo "[!] Unapproved external bootstrap symlink: $line"
+					exit 1
+					;;
+			esac
+			if [[ "$target" != /* ]]; then
+				local resolved_target runtime_root
+				runtime_root=$(pwd -P)
+				resolved_target=$(realpath -m -- "$(dirname "$link")/$target")
+				if [[ "$resolved_target" != "$runtime_root/"* ]]; then
+					echo "[!] Bootstrap symlink escapes the runtime prefix: $line"
+					exit 1
+				fi
+			fi
+		done < SYMLINKS.txt
+
+		find . -mindepth 1 -print | LC_ALL=C sort | zip -X -9 "${BOOTSTRAP_TMPDIR}/bootstrap-${1}.zip" -@
 	)
 
 	mv -f "${BOOTSTRAP_TMPDIR}/bootstrap-${1}.zip" ./
+	local archive="bootstrap-${1}.zip"
+	local version="${KOTHACODE_BOOTSTRAP_VERSION:-$(git rev-parse --short=12 HEAD)}"
+	jq -n \
+		--arg version "$version" \
+		--arg architecture "$1" \
+		--arg source_revision "$(git rev-parse HEAD)" \
+		--arg prefix "$TERMUX_PREFIX" \
+		--arg sha256 "$(sha256sum "$archive" | awk '{print $1}')" \
+		--argjson size_bytes "$(stat -c '%s' "$archive")" \
+		'{schema: 1, version: $version, architecture: $architecture, source_revision: $source_revision, expected_prefix: $prefix, sha256: $sha256, size_bytes: $size_bytes}' \
+		> "bootstrap-${1}.manifest.json"
 	echo "[*] Finished successfully (${1})."
 }
 
@@ -320,6 +434,7 @@ show_usage() {
 	echo " -r, --repository URL        Specify URL for APT repository from"
 	echo "                             which packages will be downloaded."
 	echo "                             This must be passed after '--pm' option."
+	echo " --keyring FILE              APT public keyring used to verify InRelease."
 	echo
 	echo "Architectures: ${TERMUX_ARCHITECTURES[*]}"
 	echo "Repository Base Url: ${REPO_BASE_URL}"
@@ -382,6 +497,15 @@ while (($# > 0)); do
 			else
 				echo "[!] Option '--repository' requires an argument."
 				show_usage
+				exit 1
+			fi
+			;;
+		--keyring)
+			if [ $# -gt 1 ] && [ -f "$2" ] && [ -r "$2" ]; then
+				APT_KEYRING=$(realpath "$2")
+				shift 1
+			else
+				echo "[!] Option '--keyring' requires a readable file."
 				exit 1
 			fi
 			;;
@@ -450,7 +574,7 @@ EOF
 
 	# Read package metadata.
 	unset PACKAGE_METADATA
-	declare -A PACKAGE_METADATA
+	declare -A PACKAGE_METADATA=()
 	if [ ${TERMUX_PACKAGE_MANAGER} = "apt" ]; then
 		if [ "${TERMUX_BUILD_BOOTSTRAPS}" != true ]; then
 			read_package_list_deb "$package_arch"
