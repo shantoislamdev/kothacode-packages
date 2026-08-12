@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "architecture": "aarch64",
+  "package_directories": [
+    "packages"
+  ],
+  "big_packages_file": "scripts/big-pkgs.list",
+  "scheduled_roots": [
+    "apt",
+    "bash",
+    "ca-certificates",
+    "libcurl",
+    "dash",
+    "findutils",
+    "gawk",
+    "git",
+    "jq",
+    "openssh",
+    "patch",
+    "procps",
+    "psmisc",
+    "ripgrep",
+    "tar",
+    "termux-exec",
+    "termux-tools",
+    "termux-keyring",
+    "unzip",
+    "util-linux"
+  ],
+  "resource_classes": {
+    "standard": {
+      "runner": "ubuntu-24.04",
+      "manual_max_roots": 20,
+      "scheduled_max_roots": 4,
+      "max_closure_definitions": 140,
+      "max_estimated_build_definitions": 140,
+      "min_disk_gb": 35,
+      "min_memory_gb": 12
+    },
+    "large": {
+      "runner_variable": "KOTHACODE_LARGE_RUNNER_LABEL",
+      "manual_max_roots": 1,
+      "scheduled_max_roots": 0,
+      "max_closure_definitions": 220,
+      "max_estimated_build_definitions": 220,
+      "min_disk_gb": 100,
+      "min_memory_gb": 32
+    }
+  }
+}

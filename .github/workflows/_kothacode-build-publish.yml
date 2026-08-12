@@ -1,0 +1,366 @@
+name: KothaCode Internal Package Build
+
+on:
+  workflow_call:
+    inputs:
+      mode:
+        description: Package selection mode.
+        required: true
+        type: string
+      packages:
+        description: Requested manual package roots.
+        required: false
+        type: string
+        default: ""
+      resource_class:
+        description: Resource policy class.
+        required: true
+        type: string
+      large_runner_label:
+        description: Repository-controlled label for large package builds.
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  actions: read
+  contents: read
+
+env:
+  REPO_URL: https://repo.code.amikotha.com
+  R2_BUCKET: kothacode-termux-repo
+  TERMUX_BUILDER_IMAGE_NAME: ghcr.io/termux-play-store/package-builder@sha256:07d803417c2109d0514c3b3fa79f870dd341c9bdcf6f2f6164b4e877498193ea
+  APT_REPO_ORIGIN: KothaCode
+  APT_REPO_LABEL: KothaCode Termux
+  APT_REPO_SUITE: stable
+  APT_REPO_COMPONENT: main
+  APT_REPO_ARCHES: aarch64
+
+jobs:
+  resolve:
+    name: Resolve bounded build plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      should_build: ${{ steps.plan.outputs.should_build }}
+      roots: ${{ steps.plan.outputs.roots }}
+      runner_label: ${{ steps.plan.outputs.runner_label }}
+      min_disk_gb: ${{ steps.plan.outputs.min_disk_gb }}
+      min_memory_gb: ${{ steps.plan.outputs.min_memory_gb }}
+      build_plan_artifact: ${{ steps.plan.outputs.build_plan_artifact }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Resolve requested roots and dependency budget
+        id: plan
+        env:
+          REQUESTED_PACKAGES: ${{ inputs.packages }}
+          MODE: ${{ inputs.mode }}
+          RESOURCE_CLASS: ${{ inputs.resource_class }}
+          LARGE_RUNNER_LABEL: ${{ inputs.large_runner_label }}
+        run: |
+          set -euo pipefail
+          python3 scripts/resolve-kothacode-packages.py \
+            --mode "$MODE" \
+            --packages "$REQUESTED_PACKAGES" \
+            --resource-class "$RESOURCE_CLASS" \
+            --packages-index-url "$REPO_URL/dists/stable/main/binary-aarch64/Packages" \
+            --large-runner-label "$LARGE_RUNNER_LABEL" \
+            --output build-plan.json
+          cat build-plan.json
+          echo "should_build=$(jq -r '.should_build' build-plan.json)" >> "$GITHUB_OUTPUT"
+          echo "roots=$(jq -c '.roots' build-plan.json)" >> "$GITHUB_OUTPUT"
+          echo "runner_label=$(jq -r '.runner_label' build-plan.json)" >> "$GITHUB_OUTPUT"
+          echo "min_disk_gb=$(jq -r '.min_disk_gb' build-plan.json)" >> "$GITHUB_OUTPUT"
+          echo "min_memory_gb=$(jq -r '.min_memory_gb' build-plan.json)" >> "$GITHUB_OUTPUT"
+          echo "build_plan_artifact=kothacode-package-build-plan-$GITHUB_RUN_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build plan
+        uses: actions/upload-artifact@v7
+        with:
+          name: kothacode-package-build-plan-${{ github.run_id }}
+          path: build-plan.json
+          retention-days: 30
+
+  build:
+    name: Build aarch64 packages
+    needs: resolve
+    if: ${{ needs.resolve.outputs.should_build == 'true' }}
+    runs-on: ${{ needs.resolve.outputs.runner_label }}
+    timeout-minutes: 360
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost /usr/local/lib/android || true
+          df -h
+
+      - name: Enforce runner resources
+        env:
+          MIN_DISK_GB: ${{ needs.resolve.outputs.min_disk_gb }}
+          MIN_MEMORY_GB: ${{ needs.resolve.outputs.min_memory_gb }}
+        run: |
+          set -euo pipefail
+          disk_gb=$(df -Pk . | awk 'NR == 2 { print int($4 / 1024 / 1024) }')
+          memory_gb=$(awk '/MemTotal:/ { print int($2 / 1024 / 1024) }' /proc/meminfo)
+          echo "Available disk: ${disk_gb} GiB; total memory: ${memory_gb} GiB"
+          if ((disk_gb < MIN_DISK_GB)); then
+            echo "::error::Runner has ${disk_gb} GiB free; ${MIN_DISK_GB} GiB required"
+            exit 1
+          fi
+          if ((memory_gb < MIN_MEMORY_GB)); then
+            echo "::error::Runner has ${memory_gb} GiB memory; ${MIN_MEMORY_GB} GiB required"
+            exit 1
+          fi
+
+      - name: Prepare KothaCode APT public key
+        env:
+          APT_GPG_PUBLIC_KEY: ${{ secrets.APT_GPG_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${APT_GPG_PUBLIC_KEY:-}" ]]; then
+            echo "::error::Missing armored APT_GPG_PUBLIC_KEY secret"
+            exit 1
+          fi
+          mkdir -p ~/.gnupg
+          chmod 700 ~/.gnupg
+          printf '%s' "$APT_GPG_PUBLIC_KEY" | gpg --batch --yes --dearmor \
+            --output packages/termux-keyring/termux-packages.gpg
+          key_id=$(gpg --batch --show-keys --with-colons \
+            packages/termux-keyring/termux-packages.gpg | awk -F: '$1 == "pub" { print $5; exit }')
+          [[ -n "$key_id" ]] || { echo "::error::No public key was decoded"; exit 1; }
+
+      - name: Verify package builder toolchain
+        run: |
+          set -euo pipefail
+          ./scripts/run-docker.sh bash -lc '
+            set -euo pipefail
+            source scripts/properties.sh
+            compiler="clang-${TERMUX_HOST_LLVM_MAJOR_VERSION}"
+            "$compiler" --version
+            ld.lld --version
+            probe_dir=$(mktemp -d)
+            trap '\''rm -rf "$probe_dir"'\'' EXIT
+            printf '\''int main(void) { return 0; }\n'\'' > "$probe_dir/probe.c"
+            "$compiler" -fuse-ld=lld "$probe_dir/probe.c" -o "$probe_dir/probe"
+            "$probe_dir/probe"
+          '
+
+      - name: Verify package source URLs
+        env:
+          ROOTS_JSON: ${{ needs.resolve.outputs.roots }}
+        run: |
+          set -euo pipefail
+          mapfile -t packages < <(jq -r '.[]' <<< "$ROOTS_JSON")
+          bash ./scripts/preflight-kothacode-sources.sh "${packages[@]}"
+
+      - name: Build packages sequentially
+        env:
+          ROOTS_JSON: ${{ needs.resolve.outputs.roots }}
+        run: |
+          set -euo pipefail
+          mapfile -t packages < <(jq -r '.[]' <<< "$ROOTS_JSON")
+          ./scripts/run-docker.sh ./build-package.sh \
+            -a aarch64 -i -f -C -j 2 "${packages[@]}"
+
+      - name: Print host Python configure diagnostics
+        if: ${{ failure() }}
+        run: |
+          if ! docker container inspect termux-package-builder >/dev/null 2>&1; then
+            echo "Package builder container was not created."
+            exit 0
+          fi
+          docker exec termux-package-builder bash -lc '
+            shopt -s nullglob
+            logs=(/home/builder/.termux-build/_cache/python-*/host-build/config.log)
+            for log in "${logs[@]}"; do
+              printf '\''::group::%s\n'\'' "$log"
+              cat "$log"
+              echo "::endgroup::"
+            done
+          '
+
+      - name: Sanitize deb filenames for artifact transport
+        run: |
+          set -euo pipefail
+          find output -maxdepth 1 -type f -name '*:*.deb' -print0 | while IFS= read -r -d '' file; do
+            mv -- "$file" "${file//:/%3a}"
+          done
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: kothacode-debs-aarch64
+          path: output/*.deb
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish incremental APT repository
+    needs:
+      - resolve
+      - build
+    if: ${{ needs.resolve.outputs.should_build == 'true' && needs.build.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install repository tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dpkg-dev gnupg gzip xz-utils
+
+      - name: Download package artifacts
+        uses: actions/download-artifact@v8
+        with:
+          name: kothacode-debs-aarch64
+          path: built-debs
+
+      - name: Download build plan
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.resolve.outputs.build_plan_artifact }}
+          path: plan-artifact
+
+      - name: Restore deb filename epochs
+        run: |
+          set -euo pipefail
+          find built-debs -type f -name '*%3a*.deb' -print0 | while IFS= read -r -d '' file; do
+            mv -- "$file" "${file//%3a/:}"
+          done
+
+      - name: Download current repository state
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${R2_ACCOUNT_ID:-}" || -z "${AWS_ACCESS_KEY_ID:-}" || -z "${AWS_SECRET_ACCESS_KEY:-}" ]]; then
+            echo "::error::Missing one or more R2 secrets"
+            exit 1
+          fi
+          endpoint="https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
+          mkdir -p repo-state
+          error_file=$(mktemp)
+          if aws s3 cp \
+            "s3://$R2_BUCKET/dists/stable/main/binary-aarch64/Packages" \
+            repo-state/Packages --endpoint-url "$endpoint" 2>"$error_file"; then
+            test -s repo-state/Packages
+          elif grep -Eq '(^|[^0-9])404([^0-9]|$)|NoSuchKey|Not Found|does not exist' "$error_file"; then
+            echo "Repository has no existing Packages index; initializing it."
+          else
+            cat "$error_file" >&2
+            echo "::error::Could not read the current repository state"
+            exit 1
+          fi
+          rm -f "$error_file"
+
+      - name: Import APT signing key
+        env:
+          APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          [[ -n "${APT_GPG_PRIVATE_KEY:-}" ]] || { echo "::error::Missing APT_GPG_PRIVATE_KEY"; exit 1; }
+          mkdir -p ~/.gnupg
+          chmod 700 ~/.gnupg
+          printf '%s' "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
+          signing_key=$(gpg --list-secret-keys --with-colons | awk -F: '$1 == "sec" { print $5; exit }')
+          [[ -n "$signing_key" ]] || { echo "::error::No signing key was imported"; exit 1; }
+          echo "APT_GPG_SIGNING_KEY=$signing_key" >> "$GITHUB_ENV"
+
+      - name: Generate merged signed repository
+        env:
+          APT_GPG_PASSPHRASE: ${{ secrets.APT_GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          base_args=()
+          if [[ -s repo-state/Packages ]]; then
+            base_args+=(--base-packages repo-state/Packages)
+          fi
+          jq -r '.replacement_packages[]' plan-artifact/build-plan.json > replacement-packages.txt
+          test -s replacement-packages.txt
+          find built-debs -type f -name '*.deb' -print0 | while IFS= read -r -d '' deb; do
+            dpkg-deb -f "$deb" Package
+          done | LC_ALL=C sort -u > rebuildable-packages.txt
+          test -s rebuildable-packages.txt
+          ./scripts/generate-kothacode-apt-repo.sh \
+            --input-dir built-debs \
+            --output-dir repo-public \
+            --replacement-packages replacement-packages.txt \
+            --rebuildable-packages rebuildable-packages.txt \
+            "${base_args[@]}"
+          gpg --batch --yes --output repo-public/kothacode-archive-key.gpg \
+            --export "$APT_GPG_SIGNING_KEY"
+          test -s repo-public/kothacode-archive-key.gpg
+          jq -n \
+            --arg source_revision "$GITHUB_SHA" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg packages_sha256 "$(sha256sum repo-public/dists/stable/main/binary-aarch64/Packages | awk '{print $1}')" \
+            --argjson package_count "$(grep -c '^Package:' repo-public/dists/stable/main/binary-aarch64/Packages)" \
+            '{schema: 1, source_revision: $source_revision, run_id: $run_id, architecture: "aarch64", package_count: $package_count, packages_sha256: $packages_sha256}' \
+            > repo-public/repository-state.json
+
+      - name: Publish immutable package objects
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          endpoint="https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
+          aws s3 cp repo-public/pool "s3://$R2_BUCKET/pool" \
+            --recursive --endpoint-url "$endpoint" \
+            --cache-control 'public,max-age=31536000,immutable'
+          aws s3 cp repo-public/dists/stable/main/binary-aarch64/by-hash \
+            "s3://$R2_BUCKET/dists/stable/main/binary-aarch64/by-hash" \
+            --recursive --endpoint-url "$endpoint" \
+            --cache-control 'public,max-age=31536000,immutable'
+
+      - name: Publish repository metadata last
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          endpoint="https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
+          binary_dir=repo-public/dists/stable/main/binary-aarch64
+          for file in Packages Packages.gz Packages.xz; do
+            aws s3 cp "$binary_dir/$file" \
+              "s3://$R2_BUCKET/dists/stable/main/binary-aarch64/$file" \
+              --endpoint-url "$endpoint" --cache-control 'no-cache'
+          done
+          aws s3 cp repo-public/kothacode-archive-key.gpg \
+            "s3://$R2_BUCKET/kothacode-archive-key.gpg" \
+            --endpoint-url "$endpoint" --cache-control 'public,max-age=3600'
+          aws s3 cp repo-public/repository-state.json \
+            "s3://$R2_BUCKET/state/repository.json" \
+            --endpoint-url "$endpoint" --cache-control 'no-cache'
+          aws s3 cp repo-public/dists/stable/Release \
+            "s3://$R2_BUCKET/dists/stable/Release" \
+            --endpoint-url "$endpoint" --cache-control 'no-cache'
+          aws s3 cp repo-public/dists/stable/Release.gpg \
+            "s3://$R2_BUCKET/dists/stable/Release.gpg" \
+            --endpoint-url "$endpoint" --cache-control 'no-cache'
+          aws s3 cp repo-public/dists/stable/InRelease \
+            "s3://$R2_BUCKET/dists/stable/InRelease" \
+            --endpoint-url "$endpoint" --cache-control 'no-cache'
+
+      - name: Upload generated repository metadata
+        uses: actions/upload-artifact@v7
+        with:
+          name: kothacode-apt-repository-metadata
+          path: |
+            repo-public/dists
+            repo-public/kothacode-archive-key.gpg
+            repo-public/repository-state.json
+          retention-days: 30

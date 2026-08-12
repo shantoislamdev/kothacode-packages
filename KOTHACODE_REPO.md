@@ -28,17 +28,14 @@ R2_ACCESS_KEY_ID
 R2_SECRET_ACCESS_KEY
 APT_GPG_PRIVATE_KEY
 APT_GPG_PASSPHRASE
+APT_GPG_PUBLIC_KEY
 ```
 
 `APT_GPG_PASSPHRASE` may be blank if the key has no passphrase.
 
-Optional:
-
-```text
-APT_GPG_PUBLIC_KEY
-```
-
-If `APT_GPG_PUBLIC_KEY` is not set, the workflow exports the public key from `APT_GPG_PRIVATE_KEY` and packages it into `termux-keyring`.
+`APT_GPG_PUBLIC_KEY` must be the armored export of the same signing key. Package
+builders and bootstrap jobs receive only this public key. The private key is
+confined to the serialized repository publication job.
 
 ## Create The Signing Key
 
@@ -60,28 +57,48 @@ Export the public key if you want to set `APT_GPG_PUBLIC_KEY` explicitly:
 gpg --armor --export "KothaCode Termux Repo <repo@code.amikotha.com>"
 ```
 
-## First Workflow Run
+## Package Publishing
 
-Run this workflow manually:
+Run this workflow manually for initial publication or an explicit bounded set of
+package roots:
 
 ```text
-.github/workflows/kothacode-termux-repo.yml
+.github/workflows/kothacode-package-repository.yml
 ```
 
-Use the default package list first. It builds the minimal packages needed for the bootstrap and APT runtime.
+The weekly schedule checks the curated roots in
+`.github/kothacode-package-policy.json` and builds at most four roots whose
+versions are absent from the live index. Manual standard builds accept at most
+20 roots. Both modes enforce dependency-closure, disk, and memory budgets.
 
-The workflow does three things:
+Publication is incremental. New package files and content-addressed metadata are
+uploaded before `Packages`, `Release`, and signed `InRelease`; existing unrelated
+package records and pool objects are preserved. A partial build never uses
+`aws s3 sync --delete`.
+
+Large packages from `scripts/big-pkgs.list` require `resource_class=large` and a
+repository variable named `KOTHACODE_LARGE_RUNNER_LABEL`. Large scheduled builds
+are disabled.
+
+## Bootstrap Release
+
+After the required package set has been published, run:
 
 ```text
-build-packages -> publish-repo -> build-bootstraps
+.github/workflows/kothacode-bootstrap-release.yml
 ```
 
-Expected public files after success:
+The workflow verifies the signed package index, creates an immutable versioned
+release, and optionally updates these latest aliases:
 
 ```text
-https://repo.code.amikotha.com/dists/stable/main/binary-aarch64/Packages
 https://repo.code.amikotha.com/bootstrap/bootstrap-aarch64.zip
+https://repo.code.amikotha.com/bootstrap/bootstrap-aarch64.manifest.json
 ```
+
+The archive key is published at
+`https://repo.code.amikotha.com/kothacode-archive-key.gpg` by the package
+workflow.
 
 The first KothaCode repo profile is `aarch64` only, which targets normal 64-bit Android devices (`arm64-v8a`). Add `arm` or `x86_64` later only if old phones, emulators, Chromebooks, or Android-x86 are required.
 
@@ -93,7 +110,8 @@ The default bootstrap is agent-focused and includes shell/APT basics plus `git`,
 bootstrap_extra_packages=python,nodejs
 ```
 
-Those packages must exist in the published KothaCode repo first. Add them to the workflow `packages` input in the same run or a previous run.
+Those packages must exist in the published KothaCode repo first. Publish them
+through the package workflow before generating a bootstrap.
 
 ## Important
 

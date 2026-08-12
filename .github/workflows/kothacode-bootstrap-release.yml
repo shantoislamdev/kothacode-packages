@@ -1,0 +1,119 @@
+name: KothaCode Bootstrap Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      extra_packages:
+        description: Comma-separated additional packages already present in the repository.
+        required: false
+        default: ""
+      publish_latest_alias:
+        description: Update bootstrap/bootstrap-aarch64.zip and its manifest.
+        required: true
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kothacode-aarch64-package-pipeline
+  cancel-in-progress: false
+
+env:
+  REPO_URL: https://repo.code.amikotha.com
+  R2_BUCKET: kothacode-termux-repo
+
+jobs:
+  build-and-publish:
+    name: Build and publish aarch64 bootstrap
+    if: ${{ github.repository == 'shantoislamdev/kothacode-packages' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Install bootstrap tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl gnupg jq unzip xz-utils zip
+
+      - name: Prepare pinned repository trust key
+        env:
+          APT_GPG_PUBLIC_KEY: ${{ secrets.APT_GPG_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          [[ -n "${APT_GPG_PUBLIC_KEY:-}" ]] || { echo "::error::Missing armored APT_GPG_PUBLIC_KEY"; exit 1; }
+          mkdir -p bootstrap-trust
+          printf '%s' "$APT_GPG_PUBLIC_KEY" | gpg --batch --yes --dearmor \
+            --output bootstrap-trust/kothacode-archive-key.gpg
+          test -s bootstrap-trust/kothacode-archive-key.gpg
+          gpg --batch --show-keys bootstrap-trust/kothacode-archive-key.gpg
+
+      - name: Generate bootstrap archive
+        env:
+          EXTRA_PACKAGES: ${{ inputs.extra_packages }}
+          KOTHACODE_BOOTSTRAP_VERSION: ${{ github.sha }}-${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          extra_args=()
+          if [[ -n "$EXTRA_PACKAGES" ]]; then
+            if [[ ! "$EXTRA_PACKAGES" =~ ^[a-z0-9+.,-]+$ ]]; then
+              echo "::error::Invalid extra package list"
+              exit 1
+            fi
+            extra_args+=(--add "$EXTRA_PACKAGES")
+          fi
+          ./scripts/generate-bootstraps.sh \
+            --architectures aarch64 \
+            --repository "$REPO_URL" \
+            --keyring bootstrap-trust/kothacode-archive-key.gpg \
+            "${extra_args[@]}"
+
+      - name: Upload bootstrap artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: kothacode-bootstrap-aarch64
+          path: |
+            bootstrap-aarch64.zip
+            bootstrap-aarch64.manifest.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish immutable bootstrap release
+        env:
+          BOOTSTRAP_VERSION: ${{ github.sha }}-${{ github.run_id }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${R2_ACCOUNT_ID:-}" || -z "${AWS_ACCESS_KEY_ID:-}" || -z "${AWS_SECRET_ACCESS_KEY:-}" ]]; then
+            echo "::error::Missing one or more R2 secrets"
+            exit 1
+          fi
+          endpoint="https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
+          release_prefix="s3://$R2_BUCKET/bootstrap/releases/$BOOTSTRAP_VERSION"
+          aws s3 cp bootstrap-aarch64.zip "$release_prefix/bootstrap-aarch64.zip" \
+            --endpoint-url "$endpoint" --cache-control 'public,max-age=31536000,immutable'
+          aws s3 cp bootstrap-aarch64.manifest.json "$release_prefix/bootstrap-aarch64.manifest.json" \
+            --endpoint-url "$endpoint" --cache-control 'public,max-age=31536000,immutable'
+
+      - name: Publish latest bootstrap alias
+        if: ${{ inputs.publish_latest_alias }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          endpoint="https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
+          aws s3 cp bootstrap-aarch64.zip \
+            "s3://$R2_BUCKET/bootstrap-aarch64.zip" \
+            --endpoint-url "$endpoint" --cache-control 'no-cache'
+          aws s3 cp bootstrap-aarch64.manifest.json \
+            "s3://$R2_BUCKET/bootstrap-aarch64.manifest.json" \
+            --endpoint-url "$endpoint" --cache-control 'no-cache'

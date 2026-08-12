@@ -1,0 +1,38 @@
+name: KothaCode Package Repository
+
+on:
+  schedule:
+    - cron: "17 2 * * 1"
+  workflow_dispatch:
+    inputs:
+      packages:
+        description: Space- or comma-separated root packages to build.
+        required: true
+        default: apt bash ca-certificates libcurl dash findutils gawk git jq openssh patch procps psmisc ripgrep tar termux-exec termux-tools termux-keyring unzip util-linux
+      resource_class:
+        description: Build budget. Large requires a configured large self-hosted runner label.
+        required: true
+        type: choice
+        options:
+          - standard
+          - large
+        default: standard
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: kothacode-aarch64-package-pipeline
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    if: ${{ github.repository == 'shantoislamdev/kothacode-packages' }}
+    uses: ./.github/workflows/_kothacode-build-publish.yml
+    with:
+      mode: ${{ github.event_name == 'schedule' && 'scheduled' || 'manual' }}
+      packages: ${{ inputs.packages || '' }}
+      resource_class: ${{ inputs.resource_class || 'standard' }}
+      large_runner_label: ${{ vars.KOTHACODE_LARGE_RUNNER_LABEL }}
+    secrets: inherit

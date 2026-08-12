@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 usage() {
 	cat <<'EOF'
-Usage: scripts/generate-kothacode-apt-repo.sh --input-dir DIR --output-dir DIR
+Usage: scripts/generate-kothacode-apt-repo.sh --input-dir DIR --output-dir DIR [--base-packages FILE] [--replacement-packages FILE] [--rebuildable-packages FILE]
 
-Build a minimal Debian/Termux APT repository from .deb files.
+Build an incremental Debian/Termux APT repository from .deb files. When
+--base-packages is provided, newer records replace matching packages while
+unrelated records remain in the generated index.
 
 Environment:
   APT_REPO_ORIGIN        Release Origin field. Default: KothaCode
@@ -21,6 +25,9 @@ EOF
 
 input_dir=""
 output_dir=""
+base_packages=""
+replacement_packages=""
+rebuildable_packages=""
 
 while (($# > 0)); do
 	case "$1" in
@@ -30,6 +37,18 @@ while (($# > 0)); do
 			;;
 		--output-dir)
 			output_dir="${2:-}"
+			shift 2
+			;;
+		--base-packages)
+			base_packages="${2:-}"
+			shift 2
+			;;
+		--replacement-packages)
+			replacement_packages="${2:-}"
+			shift 2
+			;;
+		--rebuildable-packages)
+			rebuildable_packages="${2:-}"
 			shift 2
 			;;
 		-h|--help)
@@ -54,15 +73,39 @@ if [[ ! -d "$input_dir" ]]; then
 	exit 1
 fi
 
+if [[ -n "$base_packages" && ! -f "$base_packages" ]]; then
+	echo "Base Packages file does not exist: $base_packages" >&2
+	exit 1
+fi
+
+if [[ -n "$replacement_packages" && ! -f "$replacement_packages" ]]; then
+	echo "Replacement package list does not exist: $replacement_packages" >&2
+	exit 1
+fi
+
+if [[ -n "$rebuildable_packages" && ! -f "$rebuildable_packages" ]]; then
+	echo "Rebuildable package list does not exist: $rebuildable_packages" >&2
+	exit 1
+fi
+
 input_dir="$(realpath "$input_dir")"
 output_dir="$(realpath -m "$output_dir")"
+if [[ -n "$base_packages" ]]; then
+	base_packages="$(realpath "$base_packages")"
+fi
+if [[ -n "$replacement_packages" ]]; then
+	replacement_packages="$(realpath "$replacement_packages")"
+fi
+if [[ -n "$rebuildable_packages" ]]; then
+	rebuildable_packages="$(realpath "$rebuildable_packages")"
+fi
 
 if [[ -z "$output_dir" || "$output_dir" == "/" ]]; then
 	echo "Refusing unsafe output directory: $output_dir" >&2
 	exit 1
 fi
 
-for cmd in dpkg-deb find gzip md5sum realpath sha1sum sha256sum sort stat xz; do
+for cmd in dpkg dpkg-deb find gzip md5sum python3 realpath sha1sum sha256sum sort stat xz; do
 	if ! command -v "$cmd" >/dev/null 2>&1; then
 		echo "Required command not found: $cmd" >&2
 		exit 1
@@ -101,33 +144,23 @@ emit_packages_file() {
 	local arch="$1"
 	local binary_dir="$output_dir/dists/$suite/$component/binary-$arch"
 	local packages_file="$binary_dir/Packages"
+	local merge_args=()
 
 	mkdir -p "$binary_dir"
-	: > "$packages_file"
-
-	while IFS= read -r deb; do
-		local package_arch rel_path size md5 sha1 sha256
-		package_arch="$(dpkg-deb -f "$deb" Architecture)"
-		if [[ "$package_arch" != "$arch" && "$package_arch" != "all" ]]; then
-			continue
-		fi
-
-		rel_path="${deb#"$output_dir/"}"
-		size="$(stat -c '%s' "$deb")"
-		md5="$(md5sum "$deb" | awk '{ print $1 }')"
-		sha1="$(sha1sum "$deb" | awk '{ print $1 }')"
-		sha256="$(sha256sum "$deb" | awk '{ print $1 }')"
-
-		{
-			dpkg-deb -f "$deb"
-			echo "Filename: $rel_path"
-			echo "Size: $size"
-			echo "MD5sum: $md5"
-			echo "SHA1: $sha1"
-			echo "SHA256: $sha256"
-			echo
-		} >> "$packages_file"
-	done < <(find "$output_dir/pool/main" -type f -name '*.deb' | sort)
+	if [[ -n "$base_packages" ]]; then
+		merge_args+=(--base-packages "$base_packages")
+	fi
+	if [[ -n "$replacement_packages" ]]; then
+		merge_args+=(--replacement-packages "$replacement_packages")
+	fi
+	if [[ -n "$rebuildable_packages" ]]; then
+		merge_args+=(--rebuildable-packages "$rebuildable_packages")
+	fi
+	python3 "$script_dir/merge-kothacode-packages.py" \
+		--architecture "$arch" \
+		--new-pool-dir "$output_dir/pool/main" \
+		--output "$packages_file" \
+		"${merge_args[@]}"
 
 	if [[ ! -s "$packages_file" ]]; then
 		echo "No packages found for architecture: $arch" >&2
@@ -136,6 +169,10 @@ emit_packages_file() {
 
 	gzip -n -9 -c "$packages_file" > "$packages_file.gz"
 	xz -T0 -9 -c "$packages_file" > "$packages_file.xz"
+	mkdir -p "$binary_dir/by-hash/SHA256"
+	for metadata in "$packages_file" "$packages_file.gz" "$packages_file.xz"; do
+		cp "$metadata" "$binary_dir/by-hash/SHA256/$(sha256sum "$metadata" | awk '{ print $1 }')"
+	done
 }
 
 echo "[*] Generating Packages metadata"
@@ -151,6 +188,7 @@ mapfile -t release_files < <(
 		! -name Release \
 		! -name InRelease \
 		! -name Release.gpg \
+		! -path '*/by-hash/*' \
 		| sort
 )
 
@@ -177,6 +215,7 @@ Codename: $suite
 Date: $(date -Ru)
 Architectures: $architectures
 Components: $component
+Acquire-By-Hash: yes
 Description: KothaCode Termux package repository
 EOF
 
