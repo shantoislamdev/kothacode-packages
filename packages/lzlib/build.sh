@@ -4,6 +4,6 @@ TERMUX_PKG_LICENSE="BSD 2-Clause, GPL-2.0"
 TERMUX_PKG_LICENSE_FILE="COPYING, COPYING.GPL"
 TERMUX_PKG_MAINTAINER="@termux"
 TERMUX_PKG_VERSION="1.16"
-TERMUX_PKG_SRCURL=https://download.savannah.gnu.org/releases/lzip/lzlib/lzlib-$TERMUX_PKG_VERSION.tar.gz
+TERMUX_PKG_SRCURL=https://download-mirror.savannah.gnu.org/releases/lzip/lzlib/lzlib-$TERMUX_PKG_VERSION.tar.gz
 TERMUX_PKG_SHA256=203228de911780309dad6813e51541d7ea89469784f01cb661edba080ff1b038
 TERMUX_PKG_AUTO_UPDATE=true
