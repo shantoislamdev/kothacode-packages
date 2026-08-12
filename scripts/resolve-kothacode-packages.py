@@ -24,9 +24,15 @@ class PlanError(RuntimeError):
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mode", choices=("manual", "scheduled"), required=True)
+    parser.add_argument(
+        "--mode",
+        choices=("manual", "scheduled", "queue-scheduled", "queue-manual"),
+        required=True,
+    )
     parser.add_argument("--packages", default="")
     parser.add_argument("--policy", default=".github/kothacode-package-policy.json")
+    parser.add_argument("--queue-file")
+    parser.add_argument("--package-count", type=int)
     parser.add_argument("--resource-class", choices=("standard", "large"), default="standard")
     parser.add_argument("--packages-index-url", required=True)
     parser.add_argument("--large-runner-label", default="")
@@ -52,6 +58,26 @@ def split_packages(value: str) -> list[str]:
         if package not in seen:
             seen.add(package)
             packages.append(package)
+    return packages
+
+
+def load_package_queue(path: Path) -> list[str]:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        raise PlanError(f"Cannot read package queue {path}: {error}") from error
+    packages: list[str] = []
+    seen: set[str] = set()
+    for line_number, line in enumerate(lines, 1):
+        package = line.split("#", 1)[0].strip()
+        if not package:
+            continue
+        if not PACKAGE_NAME_RE.fullmatch(package):
+            raise PlanError(f"Invalid package name in {path}:{line_number}: {package!r}")
+        if package in seen:
+            raise PlanError(f"Duplicate package in {path}:{line_number}: {package}")
+        seen.add(package)
+        packages.append(package)
     return packages
 
 
@@ -205,6 +231,66 @@ def definition_is_missing(
     return any(version not in published_versions.get(package, set()) for package, version in outputs)
 
 
+def select_queue_roots(
+    queue: list[str],
+    root_paths: dict[str, str],
+    dependency_cache: dict[str, list[tuple[str, str]]],
+    expected_versions: dict[str, str],
+    parents: dict[str, str],
+    published_versions: dict[str, set[str]],
+    big_packages: set[str],
+    mode: str,
+    package_count: int | None,
+    target_seconds: int,
+    seconds_per_definition: int,
+) -> dict:
+    selected: list[str] = []
+    skipped_published: list[str] = []
+    blocked_large: list[str] = []
+    deferred: list[str] = []
+    estimated_paths: set[str] = set()
+
+    for index, package in enumerate(queue):
+        if published_versions.get(package):
+            skipped_published.append(package)
+            continue
+
+        dependencies = dependency_cache[package]
+        closure_paths = {root_paths[package], *(path for _, path in dependencies)}
+        large_definitions = sorted({Path(path).name for path in closure_paths} & big_packages)
+        if large_definitions:
+            blocked_large.append(package)
+            continue
+
+        candidate_paths = {root_paths[package]}
+        for dependency, dependency_path in dependencies:
+            expected = expected_version_for(dependency, expected_versions, parents)
+            if not expected:
+                raise PlanError(f"No expected version found for dependency {dependency}")
+            if expected not in published_versions.get(dependency, set()):
+                candidate_paths.add(dependency_path)
+
+        combined_paths = estimated_paths | candidate_paths
+        if mode == "queue-scheduled" and len(combined_paths) * seconds_per_definition > target_seconds:
+            deferred = queue[index:]
+            break
+        if mode == "queue-manual" and package_count is not None and len(selected) >= package_count:
+            deferred = queue[index:]
+            break
+
+        selected.append(package)
+        estimated_paths = combined_paths
+
+    return {
+        "selected": selected,
+        "skipped_published": skipped_published,
+        "blocked_large": blocked_large,
+        "deferred": deferred,
+        "estimated_build_definitions": sorted(estimated_paths),
+        "estimated_seconds": len(estimated_paths) * seconds_per_definition,
+    }
+
+
 def main() -> int:
     args = parse_args()
     root = Path.cwd().resolve()
@@ -218,14 +304,25 @@ def main() -> int:
     if not isinstance(architecture, str) or not isinstance(package_dirs, list) or not resource_policy:
         raise PlanError("Package policy is missing architecture, package directories, or resource class")
 
-    if args.mode == "scheduled" and args.resource_class != "standard":
-        raise PlanError("Scheduled builds may only use the standard resource class")
+    queue_mode = args.mode.startswith("queue-")
+    if (args.mode == "scheduled" or queue_mode) and args.resource_class != "standard":
+        raise PlanError("Scheduled and queue builds may only use the standard resource class")
 
-    requested = (
-        split_packages(args.packages)
-        if args.mode == "manual"
-        else split_packages(" ".join(policy.get("scheduled_roots", [])))
-    )
+    if queue_mode:
+        queue_file = args.queue_file or policy.get("queue_file")
+        if not isinstance(queue_file, str) or not queue_file:
+            raise PlanError("Package policy does not define queue_file")
+        requested = load_package_queue(root / queue_file)
+        if args.mode == "queue-manual":
+            if args.package_count is None or args.package_count < 1:
+                raise PlanError("Manual queue builds require a positive --package-count")
+            max_count = int(policy.get("queue_manual_max_roots", 20))
+            if args.package_count > max_count:
+                raise PlanError(f"Requested {args.package_count} queue roots; limit is {max_count}")
+    elif args.mode == "manual":
+        requested = split_packages(args.packages)
+    else:
+        requested = split_packages(" ".join(policy.get("scheduled_roots", [])))
     if args.mode == "manual" and not requested:
         raise PlanError("Manual builds require at least one package")
 
@@ -245,7 +342,30 @@ def main() -> int:
     dependency_cache = {
         package: dependency_entries(root, root_paths[package], package_dirs)
         for package in requested
+        if not queue_mode or not published_versions.get(package)
     }
+
+    queue_result: dict | None = None
+    if queue_mode:
+        seconds_per_definition = int(policy.get("queue_estimated_seconds_per_definition", 48))
+        target_seconds = int(policy.get("queue_scheduled_target_seconds", 14400))
+        if seconds_per_definition < 1 or target_seconds < 1:
+            raise PlanError("Queue timing policy values must be positive")
+        queue_result = select_queue_roots(
+            requested,
+            root_paths,
+            dependency_cache,
+            expected_versions,
+            parents,
+            published_versions,
+            load_big_packages(root, policy["big_packages_file"]),
+            args.mode,
+            args.package_count,
+            target_seconds,
+            seconds_per_definition,
+        )
+        requested = queue_result["selected"]
+        root_paths = {package: root_paths[package] for package in requested}
 
     if args.mode == "scheduled":
         requested = [
@@ -269,13 +389,14 @@ def main() -> int:
         ]
         root_paths = {package: root_paths[package] for package in requested}
 
-    max_roots_key = "manual_max_roots" if args.mode == "manual" else "scheduled_max_roots"
-    max_roots = int(resource_policy[max_roots_key])
-    if args.mode == "scheduled":
-        requested = requested[:max_roots]
-        root_paths = {package: root_paths[package] for package in requested}
-    elif len(requested) > max_roots:
-        raise PlanError(f"Requested {len(requested)} roots; {args.resource_class} limit is {max_roots}")
+    if not queue_mode:
+        max_roots_key = "manual_max_roots" if args.mode == "manual" else "scheduled_max_roots"
+        max_roots = int(resource_policy[max_roots_key])
+        if args.mode == "scheduled":
+            requested = requested[:max_roots]
+            root_paths = {package: root_paths[package] for package in requested}
+        elif len(requested) > max_roots:
+            raise PlanError(f"Requested {len(requested)} roots; {args.resource_class} limit is {max_roots}")
 
     if not requested:
         plan = {
@@ -285,11 +406,17 @@ def main() -> int:
             "resource_class": args.resource_class,
             "should_build": False,
             "roots": [],
-            "reason": "All scheduled package roots already match the live repository",
+            "reason": (
+                "No eligible unpublished package roots remain in the queue"
+                if queue_mode
+                else "All scheduled package roots already match the live repository"
+            ),
             "runner_label": resource_policy["runner"],
             "min_disk_gb": resource_policy["min_disk_gb"],
             "min_memory_gb": resource_policy["min_memory_gb"],
         }
+        if queue_result is not None:
+            plan["queue"] = queue_result
         Path(args.output).write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
         return 0
 
@@ -306,16 +433,18 @@ def main() -> int:
             if expected not in published_versions.get(dependency, set()):
                 missing_dependency_paths.add(dependency_path)
 
-    max_closure = int(resource_policy["max_closure_definitions"])
-    if len(closure_paths) > max_closure:
-        raise PlanError(f"Dependency closure has {len(closure_paths)} definitions; limit is {max_closure}")
+    if not queue_mode:
+        max_closure = int(resource_policy["max_closure_definitions"])
+        if len(closure_paths) > max_closure:
+            raise PlanError(f"Dependency closure has {len(closure_paths)} definitions; limit is {max_closure}")
 
     estimated_build_paths = set(root_paths.values()) | missing_dependency_paths
-    max_estimated = int(resource_policy["max_estimated_build_definitions"])
-    if len(estimated_build_paths) > max_estimated:
-        raise PlanError(
-            f"Estimated local build set has {len(estimated_build_paths)} definitions; limit is {max_estimated}"
-        )
+    if not queue_mode:
+        max_estimated = int(resource_policy["max_estimated_build_definitions"])
+        if len(estimated_build_paths) > max_estimated:
+            raise PlanError(
+                f"Estimated local build set has {len(estimated_build_paths)} definitions; limit is {max_estimated}"
+            )
 
     big_packages = load_big_packages(root, policy["big_packages_file"])
     large_definitions = sorted({Path(path).name for path in closure_paths} & big_packages)
@@ -366,6 +495,8 @@ def main() -> int:
         "min_disk_gb": resource_policy["min_disk_gb"],
         "min_memory_gb": resource_policy["min_memory_gb"],
     }
+    if queue_result is not None:
+        plan["queue"] = queue_result
     Path(args.output).write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
     print(
         f"Resolved {len(requested)} roots, {len(closure_paths)} closure definitions, "

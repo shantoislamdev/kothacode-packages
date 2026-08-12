@@ -5,6 +5,10 @@
     "packages"
   ],
   "big_packages_file": "scripts/big-pkgs.list",
+  "queue_file": ".github/kothacode-package-queue.txt",
+  "queue_estimated_seconds_per_definition": 48,
+  "queue_scheduled_target_seconds": 14400,
+  "queue_manual_max_roots": 20,
   "scheduled_roots": [
     "apt",
     "bash",

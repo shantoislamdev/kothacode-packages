@@ -92,6 +92,54 @@ class PackageIndexTests(unittest.TestCase):
             )
         )
 
+    def test_queue_parser_supports_comments_and_rejects_duplicates(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            queue = Path(temporary) / "queue.txt"
+            queue.write_text("# tools\nnano # editor\n\ntmux\n", encoding="utf-8")
+            self.assertEqual(resolver.load_package_queue(queue), ["nano", "tmux"])
+            queue.write_text("nano\nnano\n", encoding="utf-8")
+            with self.assertRaises(resolver.PlanError):
+                resolver.load_package_queue(queue)
+
+    def test_scheduled_queue_skips_published_and_respects_time_budget(self):
+        result = resolver.select_queue_roots(
+            ["present", "first", "second"],
+            {"present": "packages/present", "first": "packages/first", "second": "packages/second"},
+            {
+                "first": [("dep", "packages/dep")],
+                "second": [("other", "packages/other")],
+            },
+            {"first": "1", "second": "1", "dep": "2", "other": "1"},
+            {"first": "first", "second": "second", "dep": "dep", "other": "other"},
+            {"present": {"1"}, "dep": {"1"}, "other": {"1"}},
+            set(),
+            "queue-scheduled",
+            None,
+            96,
+            48,
+        )
+        self.assertEqual(result["selected"], ["first"])
+        self.assertEqual(result["skipped_published"], ["present"])
+        self.assertEqual(result["deferred"], ["second"])
+        self.assertEqual(result["estimated_build_definitions"], ["packages/dep", "packages/first"])
+
+    def test_manual_queue_uses_root_count_without_time_limit(self):
+        result = resolver.select_queue_roots(
+            ["one", "two", "three"],
+            {name: f"packages/{name}" for name in ("one", "two", "three")},
+            {name: [] for name in ("one", "two", "three")},
+            {name: "1" for name in ("one", "two", "three")},
+            {name: name for name in ("one", "two", "three")},
+            {},
+            set(),
+            "queue-manual",
+            2,
+            1,
+            48,
+        )
+        self.assertEqual(result["selected"], ["one", "two"])
+        self.assertEqual(result["deferred"], ["three"])
+
 
 if __name__ == "__main__":
     unittest.main()

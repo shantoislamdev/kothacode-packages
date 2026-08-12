@@ -1,0 +1,35 @@
+name: KothaCode Daily Package Queue
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+    inputs:
+      package_count:
+        description: Number of next unpublished queue roots to build. Ignored when reusing a run.
+        required: true
+        type: number
+        default: 1
+      reuse_run_id:
+        description: Successful package workflow run ID to republish without rebuilding.
+        required: false
+        default: ""
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: kothacode-aarch64-package-pipeline
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    if: ${{ github.repository == 'shantoislamdev/kothacode-packages' }}
+    uses: ./.github/workflows/_kothacode-build-publish.yml
+    with:
+      mode: ${{ github.event_name == 'schedule' && 'queue-scheduled' || 'queue-manual' }}
+      package_count: ${{ inputs.package_count || 1 }}
+      resource_class: standard
+      reuse_run_id: ${{ inputs.reuse_run_id || '' }}
+    secrets: inherit

@@ -1,0 +1,7 @@
+# Ordered package roots for the daily missing-package queue.
+# The first eligible entries are selected first. Replace this temporary list as needed.
+nano
+wget
+tree
+zip
+tmux

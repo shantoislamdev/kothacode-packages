@@ -12,8 +12,13 @@ on:
         required: true
         type: boolean
         default: true
+      reuse_run_id:
+        description: Successful package workflow run ID to republish before generating a fresh bootstrap.
+        required: false
+        default: ""
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -25,9 +30,20 @@ env:
   R2_BUCKET: kothacode-termux-repo
 
 jobs:
+  replay-packages:
+    name: Republish packages from run
+    if: ${{ github.repository == 'shantoislamdev/kothacode-packages' && inputs.reuse_run_id != '' }}
+    uses: ./.github/workflows/_kothacode-build-publish.yml
+    with:
+      mode: manual
+      resource_class: standard
+      reuse_run_id: ${{ inputs.reuse_run_id }}
+    secrets: inherit
+
   build-and-publish:
     name: Build and publish aarch64 bootstrap
-    if: ${{ github.repository == 'shantoislamdev/kothacode-packages' }}
+    needs: replay-packages
+    if: ${{ always() && github.repository == 'shantoislamdev/kothacode-packages' && (inputs.reuse_run_id == '' || needs.replay-packages.result == 'success') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -71,6 +87,23 @@ jobs:
             --keyring bootstrap-trust/kothacode-archive-key.gpg \
             "${extra_args[@]}"
 
+      - name: Validate bootstrap archive and manifest
+        run: |
+          set -euo pipefail
+          test -s bootstrap-aarch64.zip
+          test -s bootstrap-aarch64.manifest.json
+          jq -e '
+            .schema == 1 and
+            .architecture == "aarch64" and
+            .expected_prefix == "/data/data/com.amikotha.code/files/usr" and
+            (.sha256 | type == "string") and
+            (.size_bytes | type == "number")
+          ' bootstrap-aarch64.manifest.json >/dev/null
+          expected_sha256=$(jq -r '.sha256' bootstrap-aarch64.manifest.json)
+          expected_size=$(jq -r '.size_bytes' bootstrap-aarch64.manifest.json)
+          [[ "$(sha256sum bootstrap-aarch64.zip | awk '{print $1}')" == "$expected_sha256" ]]
+          [[ "$(stat -c '%s' bootstrap-aarch64.zip)" == "$expected_size" ]]
+
       - name: Upload bootstrap artifacts
         uses: actions/upload-artifact@v7
         with:
@@ -112,8 +145,30 @@ jobs:
           set -euo pipefail
           endpoint="https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
           aws s3 cp bootstrap-aarch64.zip \
-            "s3://$R2_BUCKET/bootstrap-aarch64.zip" \
+            "s3://$R2_BUCKET/bootstrap/bootstrap-aarch64.zip" \
             --endpoint-url "$endpoint" --cache-control 'no-cache'
           aws s3 cp bootstrap-aarch64.manifest.json \
-            "s3://$R2_BUCKET/bootstrap-aarch64.manifest.json" \
+            "s3://$R2_BUCKET/bootstrap/bootstrap-aarch64.manifest.json" \
             --endpoint-url "$endpoint" --cache-control 'no-cache'
+
+      - name: Verify published bootstrap objects
+        env:
+          BOOTSTRAP_VERSION: ${{ github.sha }}-${{ github.run_id }}
+          PUBLISH_LATEST_ALIAS: ${{ inputs.publish_latest_alias }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          endpoint="https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
+          for key in \
+            "bootstrap/releases/$BOOTSTRAP_VERSION/bootstrap-aarch64.zip" \
+            "bootstrap/releases/$BOOTSTRAP_VERSION/bootstrap-aarch64.manifest.json"; do
+            aws s3api head-object --bucket "$R2_BUCKET" --key "$key" --endpoint-url "$endpoint" >/dev/null
+          done
+          if [[ "$PUBLISH_LATEST_ALIAS" == "true" ]]; then
+            for key in bootstrap/bootstrap-aarch64.zip bootstrap/bootstrap-aarch64.manifest.json; do
+              aws s3api head-object --bucket "$R2_BUCKET" --key "$key" --endpoint-url "$endpoint" >/dev/null
+            done
+          fi

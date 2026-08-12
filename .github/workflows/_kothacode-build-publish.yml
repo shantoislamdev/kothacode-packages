@@ -12,6 +12,16 @@ on:
         required: false
         type: string
         default: ""
+      package_count:
+        description: Number of next queue roots to build in queue-manual mode.
+        required: false
+        type: number
+        default: 0
+      reuse_run_id:
+        description: Successful package workflow run whose deb artifacts should be republished.
+        required: false
+        type: string
+        default: ""
       resource_class:
         description: Resource policy class.
         required: true
@@ -43,11 +53,14 @@ jobs:
     timeout-minutes: 20
     outputs:
       should_build: ${{ steps.plan.outputs.should_build }}
+      should_publish: ${{ steps.plan.outputs.should_publish }}
       roots: ${{ steps.plan.outputs.roots }}
       runner_label: ${{ steps.plan.outputs.runner_label }}
       min_disk_gb: ${{ steps.plan.outputs.min_disk_gb }}
       min_memory_gb: ${{ steps.plan.outputs.min_memory_gb }}
       build_plan_artifact: ${{ steps.plan.outputs.build_plan_artifact }}
+      source_revision: ${{ steps.plan.outputs.source_revision }}
+      deb_artifact_name: ${{ steps.plan.outputs.deb_artifact_name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -59,22 +72,60 @@ jobs:
           MODE: ${{ inputs.mode }}
           RESOURCE_CLASS: ${{ inputs.resource_class }}
           LARGE_RUNNER_LABEL: ${{ inputs.large_runner_label }}
+          PACKAGE_COUNT: ${{ inputs.package_count }}
+          REUSE_RUN_ID: ${{ inputs.reuse_run_id }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          python3 scripts/resolve-kothacode-packages.py \
-            --mode "$MODE" \
-            --packages "$REQUESTED_PACKAGES" \
-            --resource-class "$RESOURCE_CLASS" \
-            --packages-index-url "$REPO_URL/dists/stable/main/binary-aarch64/Packages" \
-            --large-runner-label "$LARGE_RUNNER_LABEL" \
-            --output build-plan.json
+          if [[ -n "$REUSE_RUN_ID" ]]; then
+            [[ "$REUSE_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo "::error::reuse_run_id must be a positive numeric GitHub run ID"; exit 1; }
+            run_json=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$REUSE_RUN_ID")
+            [[ "$(jq -r '.conclusion' <<< "$run_json")" == "success" ]] || {
+              echo "::error::Run $REUSE_RUN_ID is not a successful completed run"
+              exit 1
+            }
+            artifacts_json=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$REUSE_RUN_ID/artifacts?per_page=100")
+            artifact_name=$(jq -r '
+              [.artifacts[] | select(.expired == false and (.name == "debs-aarch64" or .name == "kothacode-debs-aarch64"))]
+              | sort_by(if .name == "kothacode-debs-aarch64" then 0 else 1 end)
+              | .[0].name // empty
+            ' <<< "$artifacts_json")
+            [[ -n "$artifact_name" ]] || { echo "::error::Run $REUSE_RUN_ID has no unexpired aarch64 deb artifact"; exit 1; }
+            source_revision=$(jq -r '.head_sha' <<< "$run_json")
+            jq -n \
+              --arg source_revision "$source_revision" \
+              --arg reuse_run_id "$REUSE_RUN_ID" \
+              --arg deb_artifact_name "$artifact_name" \
+              --arg runner_label "ubuntu-24.04" \
+              '{schema: 1, mode: "reuse", architecture: "aarch64", resource_class: "standard", should_build: false, should_publish: true, roots: [], replacement_packages: [], reuse_run_id: $reuse_run_id, source_revision: $source_revision, deb_artifact_name: $deb_artifact_name, runner_label: $runner_label, min_disk_gb: 35, min_memory_gb: 12}' \
+              > build-plan.json
+          else
+            queue_args=()
+            if [[ "$MODE" == "queue-manual" ]]; then
+              ((PACKAGE_COUNT > 0)) || { echo "::error::package_count must be positive"; exit 1; }
+              queue_args+=(--package-count "$PACKAGE_COUNT")
+            fi
+            python3 scripts/resolve-kothacode-packages.py \
+              --mode "$MODE" \
+              --packages "$REQUESTED_PACKAGES" \
+              --resource-class "$RESOURCE_CLASS" \
+              --packages-index-url "$REPO_URL/dists/stable/main/binary-aarch64/Packages" \
+              --large-runner-label "$LARGE_RUNNER_LABEL" \
+              --output build-plan.json \
+              "${queue_args[@]}"
+            jq '. + {should_publish: .should_build, source_revision: env.GITHUB_SHA, deb_artifact_name: "kothacode-debs-aarch64"}' build-plan.json > build-plan.tmp
+            mv build-plan.tmp build-plan.json
+          fi
           cat build-plan.json
           echo "should_build=$(jq -r '.should_build' build-plan.json)" >> "$GITHUB_OUTPUT"
+          echo "should_publish=$(jq -r '.should_publish' build-plan.json)" >> "$GITHUB_OUTPUT"
           echo "roots=$(jq -c '.roots' build-plan.json)" >> "$GITHUB_OUTPUT"
           echo "runner_label=$(jq -r '.runner_label' build-plan.json)" >> "$GITHUB_OUTPUT"
           echo "min_disk_gb=$(jq -r '.min_disk_gb' build-plan.json)" >> "$GITHUB_OUTPUT"
           echo "min_memory_gb=$(jq -r '.min_memory_gb' build-plan.json)" >> "$GITHUB_OUTPUT"
           echo "build_plan_artifact=kothacode-package-build-plan-$GITHUB_RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "source_revision=$(jq -r '.source_revision' build-plan.json)" >> "$GITHUB_OUTPUT"
+          echo "deb_artifact_name=$(jq -r '.deb_artifact_name' build-plan.json)" >> "$GITHUB_OUTPUT"
 
       - name: Upload build plan
         uses: actions/upload-artifact@v7
@@ -160,11 +211,16 @@ jobs:
       - name: Build packages sequentially
         env:
           ROOTS_JSON: ${{ needs.resolve.outputs.roots }}
+          MODE: ${{ inputs.mode }}
         run: |
           set -euo pipefail
           mapfile -t packages < <(jq -r '.[]' <<< "$ROOTS_JSON")
+          force_args=()
+          if [[ "$MODE" == "manual" || "$MODE" == "scheduled" ]]; then
+            force_args+=(-f)
+          fi
           ./scripts/run-docker.sh ./build-package.sh \
-            -a aarch64 -i -f -C -j 2 "${packages[@]}"
+            -a aarch64 -i "${force_args[@]}" -C -j 2 "${packages[@]}"
 
       - name: Print host Python configure diagnostics
         if: ${{ failure() }}
@@ -196,14 +252,14 @@ jobs:
           name: kothacode-debs-aarch64
           path: output/*.deb
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
 
   publish:
     name: Publish incremental APT repository
     needs:
       - resolve
       - build
-    if: ${{ needs.resolve.outputs.should_build == 'true' && needs.build.result == 'success' }}
+    if: ${{ always() && needs.resolve.outputs.should_publish == 'true' && (needs.build.result == 'success' || inputs.reuse_run_id != '') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -218,8 +274,10 @@ jobs:
       - name: Download package artifacts
         uses: actions/download-artifact@v8
         with:
-          name: kothacode-debs-aarch64
+          name: ${{ needs.resolve.outputs.deb_artifact_name }}
           path: built-debs
+          run-id: ${{ inputs.reuse_run_id || github.run_id }}
+          github-token: ${{ github.token }}
 
       - name: Download build plan
         uses: actions/download-artifact@v8
@@ -232,6 +290,21 @@ jobs:
           set -euo pipefail
           find built-debs -type f -name '*%3a*.deb' -print0 | while IFS= read -r -d '' file; do
             mv -- "$file" "${file//%3a/:}"
+          done
+
+      - name: Validate downloaded package artifacts
+        run: |
+          set -euo pipefail
+          mapfile -d '' -t debs < <(find built-debs -type f -name '*.deb' -print0)
+          ((${#debs[@]} > 0)) || { echo "::error::No deb files were downloaded"; exit 1; }
+          for deb in "${debs[@]}"; do
+            package=$(dpkg-deb -f "$deb" Package)
+            architecture=$(dpkg-deb -f "$deb" Architecture)
+            [[ "$package" =~ ^[a-z0-9][a-z0-9+.-]*$ ]] || { echo "::error::Invalid package metadata in $deb"; exit 1; }
+            [[ "$architecture" == "aarch64" || "$architecture" == "all" ]] || {
+              echo "::error::Unexpected architecture $architecture in $deb"
+              exit 1
+            }
           done
 
       - name: Download current repository state
@@ -284,12 +357,14 @@ jobs:
           if [[ -s repo-state/Packages ]]; then
             base_args+=(--base-packages repo-state/Packages)
           fi
-          jq -r '.replacement_packages[]' plan-artifact/build-plan.json > replacement-packages.txt
-          test -s replacement-packages.txt
+          jq -r '.replacement_packages[]?' plan-artifact/build-plan.json > replacement-packages.txt
           find built-debs -type f -name '*.deb' -print0 | while IFS= read -r -d '' deb; do
             dpkg-deb -f "$deb" Package
           done | LC_ALL=C sort -u > rebuildable-packages.txt
           test -s rebuildable-packages.txt
+          if [[ ! -s replacement-packages.txt ]]; then
+            cp rebuildable-packages.txt replacement-packages.txt
+          fi
           ./scripts/generate-kothacode-apt-repo.sh \
             --input-dir built-debs \
             --output-dir repo-public \
@@ -300,7 +375,7 @@ jobs:
             --export "$APT_GPG_SIGNING_KEY"
           test -s repo-public/kothacode-archive-key.gpg
           jq -n \
-            --arg source_revision "$GITHUB_SHA" \
+            --arg source_revision "${{ needs.resolve.outputs.source_revision }}" \
             --arg run_id "$GITHUB_RUN_ID" \
             --arg packages_sha256 "$(sha256sum repo-public/dists/stable/main/binary-aarch64/Packages | awk '{print $1}')" \
             --argjson package_count "$(grep -c '^Package:' repo-public/dists/stable/main/binary-aarch64/Packages)" \
