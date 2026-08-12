@@ -148,31 +148,32 @@ jobs:
                 git+file://*) echo "SKIP $dir <- $url (local git source)"; continue ;;
                 git+*://*)
                   remote="${url#git+}"
-                  if git ls-remote --exit-code "$remote" HEAD >/dev/null 2>&1; then
+                  if timeout 60 git ls-remote --exit-code "$remote" HEAD >/dev/null 2>&1; then
                     echo "OK   $dir <- $url (git)"
                   else
-                    echo "::error::Unreachable git source for $dir: $url"
-                    failed=1
+                    echo "::warning::Could not probe git source for $dir (transient; the build will clone it): $url"
                   fi
                   continue ;;
                 file://*) echo "SKIP $dir <- $url (local source)"; continue ;;
               esac
-              if curl --fail --location --silent --show-error --connect-timeout 30 --max-time 60 --output /dev/null --request HEAD "$url" 2>/dev/null; then
+              code=$(curl --location --silent --show-error --connect-timeout 20 --max-time 60 --retry 2 --retry-delay 3 --retry-max-time 60 --range 0-0 --output /dev/null -w '%{http_code}' "$url" 2>/dev/null)
+              rc=$?
+              if (( rc == 0 )) && [[ "$code" =~ ^[23][0-9][0-9]$ ]]; then
                 echo "OK   $dir <- $url"
-              elif curl --fail --location --silent --show-error --connect-timeout 30 --retry 2 --retry-delay 5 --retry-connrefused --max-time 90 --range 0-0 --output /dev/null "$url"; then
-                echo "OK   $dir <- $url (GET fallback)"
-              else
-                echo "::error::Unreachable source URL for $dir: $url"
+              elif (( rc == 0 )); then
+                echo "::error::Source URL for $dir returned HTTP $code (definitive failure): $url"
                 failed=1
+              else
+                echo "::warning::Could not connect to source URL for $dir (curl exit $rc; transient, the build's downloader retries): $url"
               fi
             done
           done
 
           if (( failed )); then
-            echo "::error::One or more package source URLs are unreachable. Fix the SRCURLs before building."
+            echo "::error::One or more package source URLs are definitively dead (HTTP 4xx/5xx). Fix the SRCURLs before building."
             exit 1
           fi
-          echo "All package source URLs are reachable."
+          echo "URL preflight complete: no definitive dead sources (see warnings above for transient connection issues)."
 
       - name: Build packages
         env:
