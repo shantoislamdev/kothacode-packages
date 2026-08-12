@@ -103,6 +103,77 @@ jobs:
             "$probe_dir/probe"
           '
 
+      - name: Verify package source URLs
+        env:
+          TERMUX_ARCH: ${{ matrix.arch }}
+          PACKAGE_LIST: ${{ inputs.packages }}
+        run: |
+          set -euo pipefail
+          tmpfile="$(mktemp)"
+          for pkg in $PACKAGE_LIST; do
+            python3 scripts/buildorder.py -i "packages/$pkg" packages x11-packages root-packages >> "$tmpfile"
+            echo "packages/$pkg" >> "$tmpfile"
+          done
+          mapfile -t pkg_dirs < <(awk '{print $2}' "$tmpfile" | sort -u)
+          rm -f "$tmpfile"
+
+          failed=0
+          for dir in "${pkg_dirs[@]}"; do
+            buildsh="$dir/build.sh"
+            [[ -f "$buildsh" ]] || continue
+            mapfile -t urls < <(
+              set +e +u
+              export TERMUX_SCRIPTDIR="$PWD"
+              if source scripts/properties.sh >/dev/null 2>&1 && source "$buildsh" >/dev/null 2>&1; then
+                if [[ -n "${TERMUX_PKG_SRCURL+x}" ]]; then
+                  for url in "${TERMUX_PKG_SRCURL[@]}"; do
+                    [[ -n "$url" ]] && printf '%s\n' "$url"
+                  done
+                fi
+              else
+                echo "__SRCURL_EVALUATION_FAILED__"
+              fi
+            )
+            if [[ "${urls[0]:-}" == "__SRCURL_EVALUATION_FAILED__" ]]; then
+              echo "::error::Failed to evaluate TERMUX_PKG_SRCURL for $dir (sourcing build.sh failed)"
+              failed=1
+              continue
+            fi
+            if (( ${#urls[@]} == 0 )); then
+              echo "SKIP $dir (no external source URL)"
+              continue
+            fi
+            for url in "${urls[@]}"; do
+              case "$url" in
+                git+file://*) echo "SKIP $dir <- $url (local git source)"; continue ;;
+                git+*://*)
+                  remote="${url#git+}"
+                  if git ls-remote --exit-code "$remote" HEAD >/dev/null 2>&1; then
+                    echo "OK   $dir <- $url (git)"
+                  else
+                    echo "::error::Unreachable git source for $dir: $url"
+                    failed=1
+                  fi
+                  continue ;;
+                file://*) echo "SKIP $dir <- $url (local source)"; continue ;;
+              esac
+              if curl --fail --location --silent --show-error --connect-timeout 30 --max-time 60 --output /dev/null --request HEAD "$url" 2>/dev/null; then
+                echo "OK   $dir <- $url"
+              elif curl --fail --location --silent --show-error --connect-timeout 30 --retry 2 --retry-delay 5 --retry-connrefused --max-time 90 --range 0-0 --output /dev/null "$url"; then
+                echo "OK   $dir <- $url (GET fallback)"
+              else
+                echo "::error::Unreachable source URL for $dir: $url"
+                failed=1
+              fi
+            done
+          done
+
+          if (( failed )); then
+            echo "::error::One or more package source URLs are unreachable. Fix the SRCURLs before building."
+            exit 1
+          fi
+          echo "All package source URLs are reachable."
+
       - name: Build packages
         env:
           TERMUX_ARCH: ${{ matrix.arch }}
