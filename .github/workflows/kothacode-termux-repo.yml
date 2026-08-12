@@ -32,6 +32,7 @@ concurrency:
 env:
   REPO_URL: https://repo.code.amikotha.com
   R2_BUCKET: kothacode-termux-repo
+  TERMUX_BUILDER_IMAGE_NAME: ghcr.io/termux-play-store/package-builder@sha256:07d803417c2109d0514c3b3fa79f870dd341c9bdcf6f2f6164b4e877498193ea
   APT_REPO_ORIGIN: KothaCode
   APT_REPO_LABEL: KothaCode Termux
   APT_REPO_SUITE: stable
@@ -86,6 +87,22 @@ jobs:
             exit 1
           fi
 
+      - name: Verify package builder toolchain
+        run: |
+          set -euo pipefail
+          ./scripts/run-docker.sh bash -lc '
+            set -euo pipefail
+            source scripts/properties.sh
+            compiler="clang-${TERMUX_HOST_LLVM_MAJOR_VERSION}"
+            "$compiler" --version
+            ld.lld --version
+            probe_dir=$(mktemp -d)
+            trap '\''rm -rf "$probe_dir"'\'' EXIT
+            printf '\''int main(void) { return 0; }\n'\'' > "$probe_dir/probe.c"
+            "$compiler" -fuse-ld=lld "$probe_dir/probe.c" -o "$probe_dir/probe"
+            "$probe_dir/probe"
+          '
+
       - name: Build packages
         env:
           TERMUX_ARCH: ${{ matrix.arch }}
@@ -93,6 +110,27 @@ jobs:
         run: |
           set -euo pipefail
           ./scripts/run-docker.sh ./build-package.sh -a "$TERMUX_ARCH" -f $PACKAGE_LIST
+
+      - name: Print host Python configure diagnostics
+        if: ${{ failure() }}
+        run: |
+          if ! docker container inspect termux-package-builder >/dev/null 2>&1; then
+            echo "Package builder container was not created."
+            exit 0
+          fi
+          docker exec termux-package-builder bash -lc '
+            shopt -s nullglob
+            logs=(/home/builder/.termux-build/_cache/python-*/host-build/config.log)
+            if (( ${#logs[@]} == 0 )); then
+              echo "No host Python config.log was found."
+              exit 0
+            fi
+            for log in "${logs[@]}"; do
+              printf '\''::group::%s\n'\'' "$log"
+              cat "$log"
+              echo "::endgroup::"
+            done
+          '
 
       - name: Sanitize deb filenames for upload
         run: |
