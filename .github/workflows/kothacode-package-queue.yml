@@ -11,7 +11,7 @@ on:
         type: number
         default: 1
       reuse_run_id:
-        description: Successful package workflow run ID to republish without rebuilding.
+        description: Completed package workflow run ID to republish without rebuilding.
         required: false
         default: ""
 

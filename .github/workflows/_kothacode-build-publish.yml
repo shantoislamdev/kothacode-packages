@@ -18,7 +18,7 @@ on:
         type: number
         default: 0
       reuse_run_id:
-        description: Successful package workflow run whose deb artifacts should be republished.
+        description: Completed package workflow run whose deb artifacts should be republished.
         required: false
         type: string
         default: ""
@@ -80,8 +80,8 @@ jobs:
           if [[ -n "$REUSE_RUN_ID" ]]; then
             [[ "$REUSE_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo "::error::reuse_run_id must be a positive numeric GitHub run ID"; exit 1; }
             run_json=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$REUSE_RUN_ID")
-            [[ "$(jq -r '.conclusion' <<< "$run_json")" == "success" ]] || {
-              echo "::error::Run $REUSE_RUN_ID is not a successful completed run"
+            [[ "$(jq -r '.status' <<< "$run_json")" == "completed" ]] || {
+              echo "::error::Run $REUSE_RUN_ID is not completed"
               exit 1
             }
             artifacts_json=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$REUSE_RUN_ID/artifacts?per_page=100")
