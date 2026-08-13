@@ -1,7 +1,49 @@
 # Ordered package roots for the daily missing-package queue.
-# The first eligible entries are selected first. Replace this temporary list as needed.
+# The first eligible entries are selected first.
 nano
 wget
 tree
 zip
 tmux
+
+# Core shell and project utilities
+coreutils
+grep
+sed
+less
+diffutils
+file
+which
+
+# Download, archive, and workspace utilities
+rsync
+fd
+yq
+dos2unix
+bat
+git-lfs
+
+# Diagnostics
+lsof
+strace
+iproute2
+dnsutils
+openssl
+
+# Build-system baseline
+make
+binutils
+pkg-config
+cmake
+ninja
+
+# Common development runtimes
+python
+python-pip
+nodejs-lts
+nodejs
+npm
+
+# Code-quality tools
+shellcheck
+shfmt
