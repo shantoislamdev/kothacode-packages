@@ -1,24 +1,22 @@
 #!/usr/bin/env python3
 
-import sys, os
+import sys
 
 def get_pkg_hash_from_Packages(Packages_file, package, version, hash_type="SHA256"):
     with open(Packages_file, 'r') as Packages:
         package_list = Packages.read().split('\n\n')
     for pkg in package_list:
-        if pkg.split('\n')[0] == "Package: "+package:
-            filename = None
-            pkghash = None
-            for line in pkg.split('\n'):
-                # Assuming Filename: comes before Version:
-                if line.startswith('Filename:'):
-                    filename = line.split(" ")[1]
-                elif line.startswith('Version:'):
-                    if line == 'Version: '+version:
-                        print(filename + " " + pkghash)
-                        return
-                elif line.startswith(hash_type):
-                    pkghash = line.split(" ")[1]
+        fields = {}
+        for line in pkg.splitlines():
+            if ': ' in line and not line.startswith((' ', '\t')):
+                key, value = line.split(': ', 1)
+                fields[key] = value
+        if fields.get('Package') == package and fields.get('Version') == version:
+            filename = fields.get('Filename')
+            pkghash = fields.get(hash_type)
+            if filename and pkghash:
+                print(filename + " " + pkghash)
+                return
     print("null null")
 
 def get_Packages_hash_from_Release(Release_file, arch, component, hash_type="SHA256"):

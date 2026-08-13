@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import tempfile
 import unittest
 from collections import OrderedDict
@@ -24,9 +25,22 @@ def load_script(name: str):
 
 merge = load_script("merge-kothacode-packages.py")
 resolver = load_script("resolve-kothacode-packages.py")
+hash_lookup = load_script("get_hash_from_file.py")
 
 
 class PackageIndexTests(unittest.TestCase):
+    def test_dependency_lookup_handles_upstream_field_order(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            packages = Path(temporary) / "Packages"
+            packages.write_text(
+                "Package: demo\nVersion: 1\nFilename: pool/demo.deb\nSHA256: abc123\n\n",
+                encoding="utf-8",
+            )
+            output = io.StringIO()
+            with mock.patch("sys.stdout", output):
+                hash_lookup.get_pkg_hash_from_Packages(packages, "demo", "1")
+            self.assertEqual(output.getvalue(), "pool/demo.deb abc123\n")
+
     def test_parses_multiline_fields(self):
         records = merge.parse_records(
             "Package: demo\nVersion: 1\nArchitecture: aarch64\nDescription: first line\n second line\n\n"
