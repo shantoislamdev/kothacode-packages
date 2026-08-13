@@ -106,9 +106,10 @@ uploaded before `Packages`, `Release`, and signed `InRelease`; existing unrelate
 package records and pool objects are preserved. A partial build never uses
 `aws s3 sync --delete`.
 
-Large packages from `scripts/big-pkgs.list` require `resource_class=large` and a
-repository variable named `KOTHACODE_LARGE_RUNNER_LABEL`. Large scheduled builds
-are disabled.
+Explicit manual builds may attempt packages from `scripts/big-pkgs.list` with
+the standard runner. Scheduled and queue builds continue to exclude them.
+Choose `resource_class=large` with the repository variable
+`KOTHACODE_LARGE_RUNNER_LABEL` when the standard runner is insufficient.
 
 ## Bootstrap Release
 

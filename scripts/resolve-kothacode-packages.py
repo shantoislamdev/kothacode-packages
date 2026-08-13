@@ -356,7 +356,7 @@ def main() -> int:
 
     big_packages = load_big_packages(root, policy["big_packages_file"])
     large_definitions = sorted({Path(path).name for path in closure_paths} & big_packages)
-    if args.resource_class == "standard" and large_definitions:
+    if args.mode != "manual" and args.resource_class == "standard" and large_definitions:
         raise PlanError(
             "Standard build closure contains large packages: " + ", ".join(large_definitions)
         )

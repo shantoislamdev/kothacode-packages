@@ -33,7 +33,7 @@ Keep entry-point workflows thin. Shared behavior belongs in the reusable workflo
 - Package-name presence is only a queue estimate. It must not replace exact-version checks in the builder.
 - Queue planning must remain bounded and deterministic. Resolve dependencies with `scripts/buildorder.py` without sourcing or executing package recipes.
 - Manual queue counts must be positive and respect policy limits. The reusable `package_count` input remains a string because GitHub can pass dispatch values to reusable workflows as strings; validate it before use.
-- Large packages require `resource_class=large` and `KOTHACODE_LARGE_RUNNER_LABEL`. Scheduled and queue automation must not route them to standard runners.
+- Explicit manual builds may attempt large packages on standard runners. Scheduled and queue automation must not route them there; use `resource_class=large` with `KOTHACODE_LARGE_RUNNER_LABEL` when standard resources are insufficient.
 - Replay requires a completed source run with a recognized, unexpired aarch64 `.deb` artifact. Replay skips compilation but never skips artifact, architecture, merge, or integrity validation.
 - Never replay artifacts known to contain rebuilt same-version packages whose hashes differ from the published repository.
 - Preserve source preflight, toolchain checks, runner limits, explicit secret checks, and fail-closed behavior.
