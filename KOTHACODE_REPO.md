@@ -85,20 +85,21 @@ built. The standard APT index at
 `dists/stable/main/binary-aarch64/Packages` is the authoritative R2 inventory;
 roots already present there are skipped.
 
-For scheduled runs, the resolver deduplicates each root's dependency closure and
-counts only source definitions whose exact expected package version is absent
-from R2. It selects roots until the estimated compile time reaches four hours.
-The current conservative estimate is 48 seconds per source definition: the
-successful bootstrap baseline compiled 114 unique definitions in roughly 90
-minutes. The six-hour job timeout leaves setup, publication, and estimation
-error headroom.
+For scheduled runs, the resolver reads dependencies with `buildorder.py`, without
+executing package build scripts. It counts each unpublished root plus unique
+dependency source definitions whose package name is absent from R2, then selects
+roots until the estimated compile time reaches four hours. The current
+conservative estimate is 48 seconds per source definition: the successful
+bootstrap baseline compiled 114 unique definitions in roughly 90 minutes. The
+six-hour job timeout leaves setup, publication, and estimation error headroom.
 
 Manual queue runs take a package count instead of applying the time estimate.
 For example, `package_count=3` selects the next three eligible unpublished roots.
-Both scheduled and manual queue builds use `build-package.sh -i`, so exact-version
-dependencies already published in the signed KothaCode repository are downloaded
-instead of rebuilt. The queue workflow also accepts `reuse_run_id` for artifact
-republication without compilation.
+Both scheduled and manual queue builds use `build-package.sh -i`. The builder
+performs the authoritative exact-version check against the signed KothaCode
+repository, downloading matching dependencies and building missing versions.
+The queue estimate is intentionally package-presence-based. The queue workflow
+also accepts `reuse_run_id` for artifact republication without compilation.
 
 Publication is incremental. New package files and content-addressed metadata are
 uploaded before `Packages`, `Release`, and signed `InRelease`; existing unrelated

@@ -52,14 +52,6 @@ class PackageIndexTests(unittest.TestCase):
         )
         self.assertEqual(versions, {"demo": {"1", "2"}})
 
-    def test_static_dependency_uses_parent_version(self):
-        self.assertEqual(
-            resolver.expected_version_for(
-                "demo-static", {"demo": "1"}, {"demo": "demo"}
-            ),
-            "1",
-        )
-
     def test_new_pool_filename_keeps_pool_prefix(self):
         with tempfile.TemporaryDirectory() as temporary:
             repository = Path(temporary)
@@ -75,23 +67,6 @@ class PackageIndexTests(unittest.TestCase):
                 record = merge.record_for_deb(deb, repository / "pool" / "main")
             self.assertEqual(record["Filename"], "pool/main/aarch64/demo_1_aarch64.deb")
 
-    def test_missing_dependency_version_is_detected(self):
-        self.assertTrue(
-            resolver.package_is_missing(
-                "demo", {"demo": "2"}, {"demo": "demo"}, {"demo": {"1"}}
-            )
-        )
-
-    def test_missing_explicit_subpackage_marks_definition_missing(self):
-        expected = {"demo": "1", "demo-extra": "1"}
-        parents = {"demo": "demo", "demo-extra": "demo"}
-        published = {"demo": {"1"}}
-        self.assertTrue(
-            resolver.definition_is_missing(
-                "packages/demo", expected, parents, published
-            )
-        )
-
     def test_queue_parser_supports_comments_and_rejects_duplicates(self):
         with tempfile.TemporaryDirectory() as temporary:
             queue = Path(temporary) / "queue.txt"
@@ -106,12 +81,10 @@ class PackageIndexTests(unittest.TestCase):
             ["present", "first", "second"],
             {"present": "packages/present", "first": "packages/first", "second": "packages/second"},
             {
-                "first": [("dep", "packages/dep")],
-                "second": [("other", "packages/other")],
+                "first": [("dep", "packages/shared"), ("dep-extra", "packages/shared")],
+                "second": [("other", "packages/shared"), ("new", "packages/new")],
             },
-            {"first": "1", "second": "1", "dep": "2", "other": "1"},
-            {"first": "first", "second": "second", "dep": "dep", "other": "other"},
-            {"present": {"1"}, "dep": {"1"}, "other": {"1"}},
+            {"present": {"1"}, "other": {"1"}},
             set(),
             "queue-scheduled",
             None,
@@ -121,15 +94,13 @@ class PackageIndexTests(unittest.TestCase):
         self.assertEqual(result["selected"], ["first"])
         self.assertEqual(result["skipped_published"], ["present"])
         self.assertEqual(result["deferred"], ["second"])
-        self.assertEqual(result["estimated_build_definitions"], ["packages/dep", "packages/first"])
+        self.assertEqual(result["estimated_build_definitions"], ["packages/first", "packages/shared"])
 
     def test_manual_queue_uses_root_count_without_time_limit(self):
         result = resolver.select_queue_roots(
             ["one", "two", "three"],
             {name: f"packages/{name}" for name in ("one", "two", "three")},
             {name: [] for name in ("one", "two", "three")},
-            {name: "1" for name in ("one", "two", "three")},
-            {name: name for name in ("one", "two", "three")},
             {},
             set(),
             "queue-manual",

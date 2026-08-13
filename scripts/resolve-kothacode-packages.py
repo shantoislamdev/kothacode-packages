@@ -121,40 +121,6 @@ def download_packages_index(url: str) -> dict[str, set[str]]:
     raise PlanError(f"Cannot download repository index after 3 attempts: {last_error}")
 
 
-def load_expected_versions(root: Path, architecture: str) -> tuple[dict[str, str], dict[str, str]]:
-    command = ["bash", str(root / "scripts" / "list-versions"), "-a", architecture]
-    result = subprocess.run(command, cwd=root, text=True, capture_output=True, check=False)
-    if result.returncode != 0:
-        detail = result.stderr.strip() or result.stdout.strip()
-        raise PlanError(f"scripts/list-versions failed: {detail}")
-
-    versions: dict[str, str] = {}
-    parents: dict[str, str] = {}
-    for line in result.stdout.splitlines():
-        match = re.fullmatch(r"([^=<\s]+)(?:<-([^=\s]+))?=(.+)", line.strip())
-        if not match:
-            continue
-        package, parent, version = match.groups()
-        versions[package] = version
-        parents[package] = parent or package
-    if not versions:
-        raise PlanError("scripts/list-versions returned no package versions")
-    return versions, parents
-
-
-def expected_version_for(
-    package: str,
-    expected_versions: dict[str, str],
-    parents: dict[str, str],
-) -> str | None:
-    version = expected_versions.get(package)
-    if version:
-        return version
-    if package.endswith("-static"):
-        return expected_versions.get(parents.get(package, package.removesuffix("-static")))
-    return None
-
-
 def resolve_root_paths(root: Path, package_dirs: list[str], packages: list[str]) -> dict[str, str]:
     result: dict[str, str] = {}
     for package in packages:
@@ -194,49 +160,10 @@ def load_big_packages(root: Path, relative_path: str) -> set[str]:
         raise PlanError(f"Cannot read big package list {path}: {error}") from error
 
 
-def package_is_missing(
-    package: str,
-    expected_versions: dict[str, str],
-    parents: dict[str, str],
-    published_versions: dict[str, set[str]],
-) -> bool:
-    expected = expected_version_for(package, expected_versions, parents)
-    if not expected:
-        raise PlanError(f"No expected version found for package {package}")
-    return expected not in published_versions.get(package, set())
-
-
-def definition_outputs(
-    definition_path: str,
-    expected_versions: dict[str, str],
-    parents: dict[str, str],
-) -> list[tuple[str, str]]:
-    definition = Path(definition_path).name
-    return sorted(
-        (package, version)
-        for package, version in expected_versions.items()
-        if parents.get(package) == definition
-    )
-
-
-def definition_is_missing(
-    definition_path: str,
-    expected_versions: dict[str, str],
-    parents: dict[str, str],
-    published_versions: dict[str, set[str]],
-) -> bool:
-    outputs = definition_outputs(definition_path, expected_versions, parents)
-    if not outputs:
-        raise PlanError(f"No expected package outputs found for {definition_path}")
-    return any(version not in published_versions.get(package, set()) for package, version in outputs)
-
-
 def select_queue_roots(
     queue: list[str],
     root_paths: dict[str, str],
     dependency_cache: dict[str, list[tuple[str, str]]],
-    expected_versions: dict[str, str],
-    parents: dict[str, str],
     published_versions: dict[str, set[str]],
     big_packages: set[str],
     mode: str,
@@ -264,10 +191,7 @@ def select_queue_roots(
 
         candidate_paths = {root_paths[package]}
         for dependency, dependency_path in dependencies:
-            expected = expected_version_for(dependency, expected_versions, parents)
-            if not expected:
-                raise PlanError(f"No expected version found for dependency {dependency}")
-            if expected not in published_versions.get(dependency, set()):
+            if not published_versions.get(dependency):
                 candidate_paths.add(dependency_path)
 
         combined_paths = estimated_paths | candidate_paths
@@ -326,7 +250,6 @@ def main() -> int:
     if args.mode == "manual" and not requested:
         raise PlanError("Manual builds require at least one package")
 
-    expected_versions, parents = load_expected_versions(root, architecture)
     try:
         published_versions = download_packages_index(args.packages_index_url)
     except PlanError:
@@ -355,8 +278,6 @@ def main() -> int:
             requested,
             root_paths,
             dependency_cache,
-            expected_versions,
-            parents,
             published_versions,
             load_big_packages(root, policy["big_packages_file"]),
             args.mode,
@@ -371,20 +292,10 @@ def main() -> int:
         requested = [
             package
             for package in requested
-            if definition_is_missing(
-                root_paths[package],
-                expected_versions,
-                parents,
-                published_versions,
-            )
+            if not published_versions.get(package)
             or any(
-                package_is_missing(
-                    candidate,
-                    expected_versions,
-                    parents,
-                    published_versions,
-                )
-                for candidate in {package, *(name for name, _ in dependency_cache[package])}
+                not published_versions.get(dependency)
+                for dependency, _ in dependency_cache[package]
             )
         ]
         root_paths = {package: root_paths[package] for package in requested}
@@ -427,10 +338,7 @@ def main() -> int:
         for dependency, dependency_path in dependency_cache[package]:
             dependency_packages.add(dependency)
             closure_paths.add(dependency_path)
-            expected = expected_version_for(dependency, expected_versions, parents)
-            if not expected:
-                raise PlanError(f"No expected version found for dependency {dependency}")
-            if expected not in published_versions.get(dependency, set()):
+            if not published_versions.get(dependency):
                 missing_dependency_paths.add(dependency_path)
 
     if not queue_mode:
@@ -463,14 +371,6 @@ def main() -> int:
     else:
         runner_label = resource_policy["runner"]
 
-    rebuilt_definitions = {Path(path).name for path in estimated_build_paths}
-    replacement_packages = {
-        package
-        for package, parent in parents.items()
-        if parent in rebuilt_definitions
-    }
-    replacement_packages.update(f"{definition}-static" for definition in rebuilt_definitions)
-
     plan = {
         "schema": 1,
         "mode": args.mode,
@@ -478,12 +378,11 @@ def main() -> int:
         "resource_class": args.resource_class,
         "should_build": True,
         "roots": requested,
-        "root_versions": {package: expected_versions[package] for package in requested},
         "dependency_packages": sorted(dependency_packages),
         "closure_definitions": sorted(closure_paths),
         "missing_dependency_definitions": sorted(missing_dependency_paths),
         "estimated_build_definitions": sorted(estimated_build_paths),
-        "replacement_packages": sorted(replacement_packages),
+        "replacement_packages": [],
         "large_definitions": large_definitions,
         "counts": {
             "roots": len(requested),
