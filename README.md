@@ -1,36 +1,92 @@
-# Termux packages for the Google Play build of Termux
+# KothaCode Embedded Runtime
 
-This repository contains the packages used in the [Termux build on Google Play](https://play.google.com/store/apps/details?id=com.termux&hl=en).
+This repository builds the Termux packages and bootstrap used by KothaCode's
+embedded local development environment. It is based on the
+[Termux packages for Google Play](https://github.com/termux-play-store/termux-packages)
+fork and tracks its package definitions while applying the changes required for
+KothaCode's application prefix and runtime.
 
-It's currently mostly interesting if you are a developer looking into the changes necessary to make Termux compatible with the Google Play requirements.
+Packages in this repository target the app-private prefix:
 
-Otherwise, please work on [https://github.com/termux/termux-packages](https://github.com/termux/termux-packages) instead - this repository regularly merges in changes from there.
+```text
+/data/data/com.amikotha.code/files/usr
+```
 
-See https://github.com/termux-play-store for more information, status and updates regarding Termux on Google Play.
+They are currently built for `aarch64` (`arm64-v8a`) Android devices and are
+published through KothaCode's signed APT repository:
 
-## Quick guide to how to build a package
-Most developers should use a prebuilt docker image to get a correctly configured and isolated build environment. Start with:
+```text
+https://repo.code.amikotha.com
+```
+
+## Relationship To Termux
+
+KothaCode's direct upstream is
+[termux-play-store/termux-packages](https://github.com/termux-play-store/termux-packages),
+which adapts the mature package recipes and build infrastructure created by the
+[Termux project](https://github.com/termux/termux-packages) for Google Play
+requirements. Changes that are generally useful to Termux should be contributed
+to [termux/termux-packages](https://github.com/termux/termux-packages), not its
+Play Store fork, whenever possible.
+
+This fork is not an official Termux package repository. Standard Termux packages
+are built for `/data/data/com.termux/files/usr` and contain absolute paths for
+that prefix. They cannot be installed safely into KothaCode. Likewise,
+KothaCode packages are built specifically for `com.amikotha.code` and should not
+be published as official Termux packages.
+
+## Repository And Bootstrap
+
+KothaCode uses this repository for two related artifacts:
+
+- A signed APT repository containing development tools selected for the embedded
+  environment.
+- An immutable bootstrap archive containing the minimal shell and package
+  management foundation bundled with KothaCode releases.
+
+The ordered package queue is maintained in
+`.github/kothacode-package-queue.txt`. Scheduled CI skips package roots already
+present in the published repository, builds the next eligible set and publishes
+new artifacts without deleting unrelated packages.
+
+See [KOTHACODE_REPO.md](KOTHACODE_REPO.md) for signing, CI, queue, publication
+and bootstrap release procedures.
+
+## Building A Package
+
+Use the Termux Docker build environment to obtain the expected toolchain and an
+isolated build workspace:
 
 ```sh
 ./scripts/run-docker.sh
 ```
 
-Now build a package with:
+Build a package and its missing dependencies with:
 
 ```sh
 ./build-package.sh -i <package-name>
 ```
 
-where `<package-name>` is a package name, corresponding to a directory `packages/<package-name/` (so `bash` and `vim` are examples of package names).
+`<package-name>` corresponds to a directory under `packages/`, such as `bash`
+or `vim`. Built Debian packages are written to `output/`.
 
-## Quick guide to how to develop and patch a package
-There are mainly two parts to iterating on a package:
+## Developing Package Definitions
 
-1. Edit the `packages/<package-name/build.sh` build script and run builds iteratively as above.
-2. Update package patches and run builds iteratively as above.
+A package normally consists of:
 
-Patches are applied from `packages/<package-name/*.patch` files.
+- `packages/<package-name>/build.sh`, which defines its source, dependencies and
+  build steps.
+- Optional `packages/<package-name>/*.patch` files applied during the build.
 
-Once there is an existing build, a built `.deb` file will be created in the `output/` directory, as in `output/bash_5.2.26-2_aarch64.deb`. Transfer that to your device and install with `dpkg -i output/bash_5.2.26-2_aarch64.deb`.
+Iterate by editing the package definition or patches and rerunning
+`./build-package.sh -i <package-name>`. Keep broadly applicable package fixes
+compatible with upstream Termux whenever possible; keep KothaCode-specific
+changes limited to its application prefix, runtime contract and publication
+infrastructure.
 
-Feel free to reach out with an issue or [#termux-google-play on Matrix](https://matrix.to/#/#termux-google-play:matrix.org) to discuss or get help!
+## Licensing And Attribution
+
+Termux package definitions and build tooling retain their upstream licenses and
+copyright notices. Individual packages retain their own licenses. KothaCode's
+repository, bootstrap and release process do not change the licensing terms of
+the software being packaged.
