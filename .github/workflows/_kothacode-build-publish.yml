@@ -365,7 +365,7 @@ jobs:
           if [[ ! -s replacement-packages.txt ]]; then
             cp rebuildable-packages.txt replacement-packages.txt
           fi
-          ./scripts/generate-kothacode-apt-repo.sh \
+          bash ./scripts/generate-kothacode-apt-repo.sh \
             --input-dir built-debs \
             --output-dir repo-public \
             --replacement-packages replacement-packages.txt \
