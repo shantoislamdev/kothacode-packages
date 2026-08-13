@@ -15,8 +15,8 @@ on:
       package_count:
         description: Number of next queue roots to build in queue-manual mode.
         required: false
-        type: number
-        default: 0
+        type: string
+        default: "0"
       reuse_run_id:
         description: Completed package workflow run whose deb artifacts should be republished.
         required: false
