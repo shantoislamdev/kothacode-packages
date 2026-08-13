@@ -29,7 +29,7 @@ jobs:
     uses: ./.github/workflows/_kothacode-build-publish.yml
     with:
       mode: ${{ github.event_name == 'schedule' && 'queue-scheduled' || 'queue-manual' }}
-      package_count: ${{ inputs.package_count || 1 }}
+      package_count: ${{ inputs.package_count }}
       resource_class: standard
       reuse_run_id: ${{ inputs.reuse_run_id || '' }}
     secrets: inherit
